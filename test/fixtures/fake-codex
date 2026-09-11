@@ -1,0 +1,84 @@
+#!/usr/bin/env node
+// A stand-in for the `codex` binary in app-server mode: the handshake, a thread, one
+// turn, and a scripted sequence of items and approval requests. No inference. The
+// script comes from <dataDir>/fake-scenario.json because Portrail passes the agent a
+// deliberately empty environment — CODEX_HOME is the one thing it lets through.
+import { createInterface } from "node:readline";
+import { readFileSync, appendFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+
+const home = process.env.CODEX_HOME;
+const dataDir = dirname(home);
+const scenario = JSON.parse(readFileSync(join(dataDir, "fake-scenario.json"), "utf8"));
+const log = (entry) => appendFileSync(join(dataDir, "fake-log.jsonl"), JSON.stringify(entry) + "\n");
+const write = (message) => process.stdout.write(JSON.stringify(message) + "\n");
+
+log({ argv: process.argv.slice(2), env: Object.keys(process.env).sort() });
+
+let nextServerId = 100;
+const waiting = new Map(); // server request id → continue()
+
+async function play(steps) {
+  for (const step of steps) {
+    if (step.notify) {
+      write({ method: step.notify, params: step.params ?? {} });
+    } else if (step.request) {
+      const id = nextServerId++;
+      write({ id, method: step.request, params: step.params ?? {} });
+      if (step.withdraw) {
+        // Codex withdrew the question: tell the client and never expect an answer.
+        write({ method: "serverRequest/resolved", params: { requestId: id } });
+        waiting.set(id, (result) => log({ unexpectedAnswer: { id, result } }));
+      } else {
+        const result = await new Promise((resolve) => waiting.set(id, resolve));
+        log({ answered: { method: step.request, result } });
+      }
+    } else if (step.exit) {
+      process.exit(step.exit);
+    }
+  }
+}
+
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id !== undefined && message.method === undefined) {
+    const resume = waiting.get(message.id);
+    if (resume) {
+      waiting.delete(message.id);
+      resume(message.result ?? { error: message.error });
+    }
+    return;
+  }
+  const { id, method, params } = message;
+  log({ received: method, params });
+  switch (method) {
+    case "initialize":
+      return write({ id, result: { userAgent: "fake-codex/0.0.0" } });
+    case "initialized":
+      return;
+    case "experimentalFeature/list":
+      return write({ id, result: { data: scenario.features ?? [{ name: "shell_tool", enabled: true }, { name: "unified_exec", enabled: true }] } });
+    case "model/list":
+      return write({ id, result: { data: [{ id: "gpt-fake", displayName: "Fake", isDefault: true }] } });
+    case "account/read":
+      return write({ id, result: { account: { type: "chatgpt" } } });
+    case "thread/start":
+    case "thread/resume":
+      return write({ id, result: { thread: { id: "thr_fake" } } });
+    case "mcpServerStatus/list":
+      if (scenario.mcpListFails) return write({ id, error: { code: -32603, message: "mcp inventory unavailable" } });
+      return write({ id, result: { data: scenario.mcpServers ?? [] } });
+    case "turn/start":
+      write({ id, result: { turn: { id: "turn_fake" } } });
+      void play(scenario.steps ?? []);
+      return;
+    case "turn/interrupt":
+      write({ id, result: {} });
+      write({ method: "turn/completed", params: { turn: { id: "turn_fake", status: "interrupted" } } });
+      return;
+    case "turn/steer":
+      return write({ id, result: {} });
+    default:
+      return write({ id, error: { code: -32601, message: `fake does not implement ${method}` } });
+  }
+});

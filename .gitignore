@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.portrail/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.sqlite*
+*.log
+coverage/
+*.tgz
+sbom.json

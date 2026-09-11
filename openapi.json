@@ -1,0 +1,1713 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Portrail",
+    "version": "0.1.0",
+    "description": "An HTTP API in front of Codex and Claude Code running on your own machine. Every route under /v1 needs a bearer API key.",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:7431"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "prt_\u2026"
+      },
+      "local": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Portrail-Local",
+        "description": "The token the daemon writes to daemon.json (mode 0600) when it starts. Only someone who can read the data directory has it; it is not an API key and never leaves the machine. This is how the free tier answers an `ask`."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "details": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "waiting_for_approval",
+              "cancelling",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "outcome_unknown"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deadlineAt": {
+            "type": "string"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancellationRequested": {
+            "type": "boolean"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer"
+              },
+              "outputTokens": {
+                "type": "integer"
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "events": {
+            "type": "string"
+          },
+          "operations": {
+            "type": "object",
+            "description": "What the agent asked for and what it got. A succeeded run with denied > 0 did not do everything asked.",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "allowed": {
+                "type": "integer"
+              },
+              "denied": {
+                "type": "integer"
+              },
+              "asked": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total",
+              "allowed",
+              "denied",
+              "asked"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "state",
+          "createdAt",
+          "deadlineAt",
+          "cancellationRequested",
+          "usage",
+          "events",
+          "operations"
+        ]
+      },
+      "CreateRun": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "enum": [
+              "codex",
+              "claude"
+            ]
+          },
+          "workspace": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 14400
+          },
+          "wait": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 3600
+          },
+          "callback": {
+            "type": "string",
+            "format": "uri",
+            "description": "Portrail Pro: POST the result here when the run ends."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Free-form fields stored on the run and returned with it; Portrail Pro reads `callback` from here too."
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "attention_required"
+            ]
+          },
+          "nativeSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastEventSeq": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": "string"
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "root"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "authMode": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "api_key",
+              "none",
+              "unknown"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Operation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "deciding",
+              "pending",
+              "decided",
+              "expired"
+            ]
+          },
+          "operation": {
+            "type": "object"
+          },
+          "decision": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "decidedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "sessionId",
+          "seq",
+          "type",
+          "timestamp",
+          "data"
+        ]
+      },
+      "Key": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tokenPreview": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Present only in the create response."
+          }
+        }
+      },
+      "CreateKey": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresInDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "policy": {}
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness, version, agents, and whether Pro is loaded.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "agents": {
+                      "type": "array"
+                    },
+                    "pro": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs": {
+      "post": {
+        "summary": "Start a run.",
+        "description": "Without wait: 202 and the queued run. With wait: 200 and the finished run if it ended in time, else 202.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "8\u2013200 characters. A retry with the same key and body returns the same run."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRun"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Finished (wait)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session busy, or Idempotency-Key conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "get": {
+        "summary": "List runs, newest first.",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "starting",
+                "running",
+                "waiting_for_approval",
+                "cancelling",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "outcome_unknown"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Run"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "nextOffset": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{runId}": {
+      "get": {
+        "summary": "One run.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{runId}/operations": {
+      "get": {
+        "summary": "Every operation the agent asked about, with its decision.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Operation"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/operations/pending": {
+      "get": {
+        "summary": "Operations waiting for an answer from this machine.",
+        "description": "Local only: needs X-Portrail-Local. Lists every parked operation across runs, so `portrail approve` can find the one to answer.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Operation"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong or missing X-Portrail-Local.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "local": []
+          }
+        ]
+      }
+    },
+    "/v1/operations/{operationId}/answer": {
+      "post": {
+        "summary": "Allow or refuse a parked operation, once, from this machine.",
+        "description": "Local only: needs X-Portrail-Local. The decision applies to this operation only; nothing is remembered and no rule is written. Portrail Pro adds decisions from anywhere, by anyone, with scopes and a record.",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "verdict"
+                ],
+                "properties": {
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "allow",
+                      "deny"
+                    ]
+                  },
+                  "by": {
+                    "type": "string",
+                    "description": "Who answered; recorded as `local:<by>`. Defaults to \"terminal\"."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The decided operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Operation"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong or missing X-Portrail-Local.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The operation is no longer waiting (already decided or timed out).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "local": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{runId}/events": {
+      "get": {
+        "summary": "Server-sent events for the run. Resumable.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream; each data line is an Event",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Cursor behind the retention window",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{runId}/cancel": {
+      "post": {
+        "summary": "Stop a run.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/runs/{runId}/reply": {
+      "post": {
+        "summary": "Steer a running Codex turn.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "summary": "List sessions.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Session"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "nextOffset": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "description": ""
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": ""
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{sessionId}": {
+      "get": {
+        "summary": "One session with its runs.",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/sessions/{sessionId}/close": {
+      "post": {
+        "summary": "Close a session.",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "summary": "List workspaces.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Workspace"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Enrol a folder.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "root": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "root"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workspace"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/workspaces/{ref}": {
+      "delete": {
+        "summary": "Remove a workspace by name or id.",
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "summary": "Installed agents and their readiness.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deep",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Ask Claude for a real completion instead of reading credentials from disk (one small call). Codex is always verified through its app-server."
+          }
+        ]
+      }
+    },
+    "/v1/keys": {
+      "get": {
+        "summary": "List keys.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Key"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a key. The token is returned once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKey"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Key"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/keys/{keyId}": {
+      "delete": {
+        "summary": "Revoke a key.",
+        "parameters": [
+          {
+            "name": "keyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Key"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  }
+}

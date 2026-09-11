@@ -1,0 +1,134 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { canonicalPath, containOperation, refuseWorkspaceRoot } from "../src/core/gateway.ts";
+import { globToRegExp } from "../src/decide/match.ts";
+import { BuiltinDecider } from "../src/decide/builtin.ts";
+import { DEFAULT_CONFIG } from "../src/config.ts";
+import type { Operation } from "../src/types.ts";
+
+const base = { id: "op", sessionId: "s", runId: "r", workspaceId: "w", agent: "codex" as const, requestedAt: "" };
+const realTmp = (prefix: string) => mkdtempSync(join(tmpdir(), prefix));
+
+test("a dangling symlink pointing outside the workspace is refused, and a symlink alias is judged by its real path", () => {
+  const root = realTmp("ws-");
+  const outside = realTmp("outside-");
+  symlinkSync(join(outside, "victim.txt"), join(root, "escape.txt")); // dangling: victim.txt does not exist
+  const write: Operation = { ...base, kind: "write", changes: [{ path: "escape.txt", change: "add" }] };
+  assert.match(containOperation(write, root).refused ?? "", /outside the workspace/);
+
+  // A symlink alias for .git inside the workspace: containment passes, but the decider
+  // must see the real ".git/…" path so the deny glob fires.
+  mkdirSync(join(root, ".git", "hooks"), { recursive: true });
+  symlinkSync(join(root, ".git"), join(root, "hooksesc"));
+  const hook: Operation = { ...base, kind: "write", changes: [{ path: "hooksesc/hooks/pre-commit", change: "add" }] };
+  const contained = containOperation(hook, root);
+  assert.equal(contained.refused, null);
+  assert.match((contained.operation as any).changes[0].path, /\/\.git\/hooks\/pre-commit$/, "canonical path substituted");
+  const canonical = canonicalPath(root, "hooksesc/hooks/pre-commit");
+  assert.ok(canonical.endsWith("/.git/hooks/pre-commit"));
+});
+
+test("path rules ignore case, because the filesystem does", () => {
+  assert.ok(globToRegExp(".env*", true).test(".ENV.local"));
+  assert.ok(globToRegExp("**/*.pem", true).test("certs/SERVER.PEM"));
+  assert.ok(!globToRegExp("npm test*", false).test("NPM TEST"), "commands stay case-sensitive");
+});
+
+test("an operation that declares nothing is refused, except a read which means the workspace root", async () => {
+  const empty = new BuiltinDecider({ allow: [], deny: [] });
+  const ctx = { keyId: null, keyPolicy: null, workspaceRoot: "/w", priorDecisions: [] };
+  assert.equal((await empty.decide({ ...base, kind: "write", changes: [] }, ctx)).verdict, "deny");
+  assert.equal((await empty.decide({ ...base, kind: "read", paths: [] }, ctx)).verdict, "deny", "no allow rule at all");
+  const permissive = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  assert.equal((await permissive.decide({ ...base, kind: "read", paths: [] }, ctx)).verdict, "allow", "TodoWrite-style reads still work");
+  const root = realTmp("ws-");
+  assert.match(containOperation({ ...base, kind: "write", changes: [] }, root).refused ?? "", /no files declared/);
+  assert.match(containOperation({ ...base, kind: "exec", command: "   ", cwd: root }, root).refused ?? "", /empty command/);
+});
+
+test("home, root, and anything holding Portrail's own data cannot be a workspace", () => {
+  assert.match(refuseWorkspaceRoot("/") ?? "", /root/);
+  assert.match(refuseWorkspaceRoot(homedir()) ?? "", /home directory/);
+  const data = realTmp("portrail-home-");
+  const parent = join(data, "..");
+  assert.match(refuseWorkspaceRoot(parent, data) ?? "", /protected directory/);
+  const project = realTmp("project-");
+  assert.equal(refuseWorkspaceRoot(project, data), null, "an ordinary folder is fine");
+  const withDot = realTmp("dot-");
+  mkdirSync(join(withDot, ".portrail"));
+  assert.match(refuseWorkspaceRoot(withDot) ?? "", /\.portrail/);
+});
+
+test("even inside an enrolled workspace, the agent's own config and secrets are off limits", () => {
+  // Simulate a broad enrolment by pretending home is the root; protected paths still refuse.
+  const root = homedir();
+  const op: Operation = { ...base, kind: "write", changes: [{ path: ".ssh/authorized_keys", change: "add" }] };
+  assert.match(containOperation(op, root).refused ?? "", /protected directory/);
+  const rc: Operation = { ...base, kind: "read", paths: [".zshrc"] };
+  assert.match(containOperation(rc, root).refused ?? "", /protected directory/);
+});
+
+test("'publish' inside a commit message is fine; running arbitrary package scripts is not", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const ctx = { keyId: null, keyPolicy: null, workspaceRoot: "/w", priorDecisions: [] };
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/w" });
+  assert.equal((await decider.decide(exec('git commit -m "publish notes"'), ctx)).verdict, "allow");
+  assert.equal((await decider.decide(exec("npm publish"), ctx)).verdict, "deny");
+  assert.equal((await decider.decide(exec("npm run deploy"), ctx)).verdict, "deny", "only named safe scripts");
+  assert.equal((await decider.decide(exec("npm run build"), ctx)).verdict, "allow");
+  assert.equal((await decider.decide(exec("node evil.js"), ctx)).verdict, "deny", "node <file> is not auto-allowed");
+  assert.equal((await decider.decide(exec("node --test"), ctx)).verdict, "allow");
+});
+
+test("read-only compound commands of the kind Codex composes pass the free defaults, and an environment assignment does not", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const ctx = { keyId: null, keyPolicy: null, workspaceRoot: "/w", priorDecisions: [] };
+  for (const command of [
+    "sed -n '1,240p' src/cli/args.ts && rg --files test | sort | head -20",
+    "which -a node; command -v fnm || true; command -v mise || true",
+    "CI=1 NODE_ENV=test npm test",
+    "git status --short && git diff -- test/args.test.ts",
+  ])
+    assert.equal((await decider.decide({ ...base, kind: "exec", command, cwd: "/w" }, ctx)).verdict, "allow", command);
+  // A variable that changes what a command does is not a prefix to ignore.
+  for (const command of ["PATH=/x/bin:/usr/bin npm test", "NODE_OPTIONS=--require=./evil.js tsc --version", "FOO=1 npm test", "GIT_CONFIG_COUNT=1 git status"]) {
+    const decision = await decider.decide({ ...base, kind: "exec", command, cwd: "/w" }, ctx);
+    assert.equal(decision.verdict, "deny", command);
+    assert.match(decision.reason, /environment assignment/);
+  }
+});
+
+test("a command's working directory and the paths in its arguments are held against the protected list", async () => {
+  const { containOperation } = await import("../src/core/gateway.ts");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir, homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "portrail-exec-"));
+  const exec = (command: string, cwd = root) => containOperation({ ...base, kind: "exec", command, cwd }, root);
+  assert.equal(exec("ls").refused, null);
+  assert.equal(exec("ls", root + "/sub").refused, null, "a subdirectory that does not exist yet is still inside");
+  assert.match(exec("ls", homedir()).refused ?? "", /working directory .*outside the workspace/);
+  assert.match(exec("cat config", join(homedir(), ".ssh")).refused ?? "", /working directory/);
+  for (const command of [
+    "cat ~/.ssh/id_rsa",
+    "cat ~/.codex/auth.json",
+    "cat ~/.claude/settings.json",
+    "cat ~/.portrail/daemon.json",
+    `head -c 100 ${homedir()}/.aws/credentials`,
+    "cat --file=~/.ssh/config",
+    "ls ~/.gnupg",
+    "cat <~/.zshrc",
+  ]) assert.match(exec(command).refused ?? "", /protected everywhere/, command);
+  assert.equal(exec("cat README.md && ls ./src").refused, null);
+  // A relative path that climbs out of the workspace is resolved, not trusted.
+  const { mkdirSync } = await import("node:fs");
+  const inHome = mkdtempSync(join(homedir(), "portrail-ws-"));
+  mkdirSync(join(inHome, "src"));
+  assert.match(containOperation({ ...base, kind: "exec", command: "cat src/../../.zshrc", cwd: inHome }, inHome).refused ?? "", /protected everywhere/);
+  // What no rule can judge is refused here, before any decider sees it.
+  assert.match(exec("cat $HOME/.ssh/id_rsa").refused ?? "", /variable expansion/);
+  assert.match(exec("ls src/*").refused ?? "", /shell glob/);
+});
