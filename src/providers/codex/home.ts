@@ -4,6 +4,8 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
+  renameSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -114,6 +116,7 @@ export function prepareCodexHome(dataDir: string): CodexHome {
   const link = join(path, "auth.json");
 
   let authSource: string | null = null;
+  adoptStrayLogin(link, sourceAuth);
   if (existsSync(sourceAuth)) {
     const current = existsSync(link) || isDangling(link) ? safeReadlink(link) : null;
     if (current !== sourceAuth) {
@@ -126,6 +129,45 @@ export function prepareCodexHome(dataDir: string): CodexHome {
   }
 
   return { path, authSource };
+}
+
+/**
+ * Codex may refresh its token by writing a new file and renaming it over `auth.json`.
+ * Done through our link, that replaces the link with a regular file: the user's own
+ * Codex stops seeing refreshes, and a live token sits inside the Portrail data
+ * directory. Put the token back where it belongs — a newer or only copy wins, an
+ * identical or older one is dropped — and let the caller relink. Says so once on
+ * stderr, without the token.
+ */
+function adoptStrayLogin(link: string, sourceAuth: string): void {
+  let stray;
+  try {
+    stray = lstatSync(link);
+  } catch {
+    return;
+  }
+  if (!stray.isFile()) return;
+
+  const content = readFileSync(link);
+  let what = "discarded the copy";
+  let source;
+  try {
+    source = statSync(sourceAuth);
+  } catch {
+    source = null;
+  }
+  const differs = !source || !content.equals(readFileSync(sourceAuth));
+  if (differs && (!source || stray.mtimeMs > source.mtimeMs)) {
+    // Write beside the target and rename, so a reader never sees a half-written login.
+    const temporary = `${sourceAuth}.portrail-tmp`;
+    writeFileSync(temporary, content, { mode: 0o600 });
+    renameSync(temporary, sourceAuth);
+    what = source ? "moved the newer token back to it" : "moved the token there";
+  }
+  unlinkSync(link);
+  console.error(
+    `codex login: ${link} had become a regular file instead of a link to ${sourceAuth}; ${what} and relinked.`,
+  );
 }
 
 /** Only overwrite files we wrote ourselves; never clobber something a person edited. */
