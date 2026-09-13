@@ -984,3 +984,68 @@ test("a caller that disconnects while waiting frees its slot and its listener", 
   );
   await s.close();
 });
+
+test("runs and sessions page newest first with a total and a next offset, filtered in the database", async () => {
+  const s = await serverWithKey();
+  const ids: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const created = await s.app.inject({
+      method: "POST",
+      url: "/v1/runs",
+      headers: s.headers,
+      payload: {
+        agent: "fake",
+        workspace: "work",
+        prompt: script([{ text: `${i}` }]),
+        wait: 5,
+      },
+    });
+    ids.push(created.json().id);
+  }
+  const first = s.gateway.run(ids[0]!);
+  s.store.put("run", { ...first, id: "run_cancelled_by_hand", state: "cancelled" });
+
+  const page = (
+    await s.app.inject({ method: "GET", url: "/v1/runs?limit=2", headers: s.headers })
+  ).json();
+  assert.equal(page.items.length, 2);
+  assert.equal(page.total, 6);
+  assert.equal(page.nextOffset, 2);
+  assert.equal(page.items[0].id, "run_cancelled_by_hand", "newest first");
+  const last = (
+    await s.app.inject({
+      method: "GET",
+      url: "/v1/runs?limit=2&offset=4",
+      headers: s.headers,
+    })
+  ).json();
+  assert.equal(last.items.length, 2);
+  assert.equal(last.nextOffset, undefined);
+  const cancelled = (
+    await s.app.inject({
+      method: "GET",
+      url: "/v1/runs?state=cancelled",
+      headers: s.headers,
+    })
+  ).json();
+  assert.equal(cancelled.total, 1);
+  const own = (
+    await s.app.inject({
+      method: "GET",
+      url: `/v1/runs?session=${first.sessionId}`,
+      headers: s.headers,
+    })
+  ).json();
+  assert.equal(own.total, 2, "the first run and its hand-made twin share a session");
+  const sessions = (
+    await s.app.inject({
+      method: "GET",
+      url: "/v1/sessions?limit=1",
+      headers: s.headers,
+    })
+  ).json();
+  assert.equal(sessions.items.length, 1);
+  assert.equal(sessions.total, 5);
+  assert.equal(sessions.nextOffset, 1);
+  await s.close();
+});

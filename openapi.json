@@ -569,7 +569,8 @@
             "required": false,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Items per page, 1\u2013100 (default 50). Newest first."
           },
           {
             "name": "offset",
@@ -577,7 +578,8 @@
             "required": false,
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Items to skip. The answer carries nextOffset while more remain and total for the whole filter."
           }
         ],
         "responses": {
@@ -1102,7 +1104,7 @@
               "maximum": 100,
               "default": 50
             },
-            "description": ""
+            "description": "Items per page, 1\u2013100 (default 50). Newest first."
           },
           {
             "name": "offset",
@@ -1113,7 +1115,7 @@
               "minimum": 0,
               "default": 0
             },
-            "description": ""
+            "description": "Items to skip. The answer carries nextOffset while more remain and total for the whole filter."
           }
         ]
       }
