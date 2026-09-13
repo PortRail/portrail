@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { Operation } from "../../types.ts";
 
 /**
@@ -60,9 +61,17 @@ export function toolToOperation(
       };
     case "Read":
       return { ...base, kind: "read", paths: [str("file_path") ?? ""] };
-    case "Glob":
     case "Grep":
-      return { ...base, kind: "read", paths: [str("path") ?? workspaceRoot] };
+      // Content search: whatever lies under the directory can come back in the output.
+      return { ...base, kind: "read", recursive: true, paths: [str("path") ?? workspaceRoot] };
+    case "Glob": {
+      // Names only — but a pattern that starts elsewhere or climbs out is judged as that place.
+      const from = str("path") ?? workspaceRoot;
+      const pattern = str("pattern") ?? "";
+      const paths = [from];
+      if (pattern.startsWith("/") || pattern.split("/").includes("..")) paths.push(resolve(from, pattern.split(/[*?[{]/)[0] ?? ""));
+      return { ...base, kind: "read", paths };
+    }
     case "WebFetch":
       return { ...base, kind: "net", ...(str("url") ? { url: str("url")!, host: safeHost(str("url")!) } : {}) };
     case "WebSearch":

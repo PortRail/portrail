@@ -53,6 +53,8 @@ export interface WriteOperation extends OperationBase {
 export interface ReadOperation extends OperationBase {
   kind: "read";
   paths: string[];
+  /** A search over a directory: every file beneath it may be read, so every file is judged. */
+  recursive?: boolean;
 }
 
 export interface NetOperation extends OperationBase {
