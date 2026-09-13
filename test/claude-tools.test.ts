@@ -115,3 +115,35 @@ test("a Grep is a search over a directory, and a Glob pattern that points somewh
   if (climbing?.kind === "read")
     assert.ok(climbing.paths.includes("/x"), climbing.paths.join(","));
 });
+
+test("a Grep's glob and type travel with the read, so only files it opens are judged", () => {
+  const withGlob = toolToOperation(
+    "Grep",
+    { pattern: "x", glob: "*.{ts,tsx}" },
+    base,
+    root,
+  );
+  if (withGlob?.kind === "read") {
+    assert.deepEqual(withGlob.filter?.globs, [
+      { pattern: "*.{ts,tsx}", exclude: false, dialect: "rg" },
+    ]);
+    assert.equal(withGlob.filter?.unmatched, "drop");
+  } else assert.fail("Grep maps to a read");
+  const excluding = toolToOperation(
+    "Grep",
+    { pattern: "x", glob: "!*.test.ts" },
+    base,
+    root,
+  );
+  if (excluding?.kind === "read") {
+    assert.deepEqual(excluding.filter?.globs, [
+      { pattern: "*.test.ts", exclude: true, dialect: "rg" },
+    ]);
+    assert.equal(excluding.filter?.unmatched, "keep");
+  }
+  const typed = toolToOperation("Grep", { pattern: "x", type: "py" }, base, root);
+  if (typed?.kind === "read")
+    assert.deepEqual(typed.filter, { globs: [], types: ["py"], unmatched: "keep" });
+  const plain = toolToOperation("Grep", { pattern: "x" }, base, root);
+  if (plain?.kind === "read") assert.equal(plain.filter, undefined);
+});
