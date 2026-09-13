@@ -22,6 +22,8 @@ const started = Date.now();
 const stamp = () => `+${((Date.now() - started) / 1000).toFixed(1)}s`;
 
 // Allow everything except one deliberately refused command, so we can see both paths.
+// `whoami` is on Codex's own auto-trusted list: seeing it asked about and refused
+// proves the managed rules made Codex ask, whatever list this Codex version ships.
 async function decide(operation: Operation): Promise<Decision> {
   const refused = operation.kind === "exec" && /\bwhoami\b/.test(operation.command);
   const decision: Decision = refused
