@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_CONFIG, validateConfig } from "../src/config.ts";
+import { DEFAULT_CONFIG, RUN_MAX_SECONDS, validateConfig } from "../src/config.ts";
 import { parsePatterns } from "../src/decide/match.ts";
 
 test("the shipped defaults are internally valid", () => {
@@ -27,4 +27,11 @@ test("bad values are refused with a message naming the field", () => {
 test("TLS needs both halves or neither", () => {
   assert.throws(() => validateConfig({ tls: { cert: "/a.pem", key: null } }), /both/);
   assert.doesNotThrow(() => validateConfig({ tls: { cert: "/a.pem", key: "/a.key" } }));
+});
+
+test("the run time limit has the same bounds in the config as on the API", () => {
+  assert.throws(() => validateConfig({ run: { maxSeconds: 20_000 } }), /run\.maxSeconds/);
+  assert.throws(() => validateConfig({ run: { maxSeconds: 29 } }), /run\.maxSeconds/);
+  assert.equal(validateConfig({ run: { maxSeconds: 14_400 } }).run.maxSeconds, 14_400);
+  assert.deepEqual(RUN_MAX_SECONDS, { min: 30, max: 14_400 });
 });

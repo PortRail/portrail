@@ -16,6 +16,7 @@ import {
 } from "../types.ts";
 import { parseCommand, type CommandSegment } from "../decide/builtin.ts";
 import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
+import { RUN_MAX_SECONDS } from "../config.ts";
 import { canonicalPath, isWithin, isWithinFold } from "./paths.ts";
 export { canonicalPath } from "./paths.ts";
 import { DeltaBatcher } from "./delta-batcher.ts";
@@ -306,10 +307,10 @@ export class Gateway extends EventEmitter {
 
       const maxSeconds = input.maxSeconds ?? this.options.defaultMaxSeconds;
       ensure(
-        Number.isInteger(maxSeconds) && maxSeconds >= 30 && maxSeconds <= 4 * 3600,
+        Number.isInteger(maxSeconds) && maxSeconds >= RUN_MAX_SECONDS.min && maxSeconds <= RUN_MAX_SECONDS.max,
         400,
         "INVALID_REQUEST",
-        "maxSeconds must be between 30 and 14400.",
+        `maxSeconds must be between ${RUN_MAX_SECONDS.min} and ${RUN_MAX_SECONDS.max}.`,
       );
 
       if (input.id) {
