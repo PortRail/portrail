@@ -5,6 +5,7 @@ import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
 import { sedObjection } from "./sed.ts";
 import { gitIgnored } from "./ignored.ts";
+import { recursiveReadOf } from "./recursive.ts";
 import { REACH_LIMIT, reachableFiles } from "../core/reach.ts";
 import { statSync } from "node:fs";
 
@@ -378,37 +379,28 @@ export class BuiltinDecider implements Decider {
     dirs: readonly string[],
     search: { hidden: boolean; follow: boolean; respectsIgnore: boolean },
     root: string,
-    values: Subject[],
-  ): Promise<Decision | null> {
+  ): Promise<{ refused: Decision | null; reached: Array<{ where: string; subjects: Subject[] }> }> {
+    const reached: Array<{ where: string; subjects: Subject[] }> = [];
     for (const dir of dirs) {
       if (!isDirectory(dir)) continue;
       const reach = reachableFiles(dir, root, { hidden: search.hidden, follow: search.follow, limit: this.reachLimit });
       const where = relativise(root, dir);
+      const refuse = (reason: string, rule?: string): { refused: Decision; reached: [] } => ({ refused: { verdict: "deny", reason, ...(rule ? { rule } : {}) }, reached: [] });
       if (reach.truncated)
-        return { verdict: "deny", reason: `Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.` };
+        return refuse(`Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.`);
       if (reach.outside)
-        return { verdict: "deny", reason: `Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.` };
+        return refuse(`Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`);
       const named = reach.files.map((file) => [file, relativise(root, file)] as const);
       const denied = named.filter(([, relativePath]) => firstMatch(this.deny, "read", [relativePath]));
       const ignored = denied.length && search.respectsIgnore ? await gitIgnored(root, denied.map(([file]) => file)) : new Set<string>();
       const first = denied.find(([file]) => !ignored.has(file));
       if (first) {
         const rule = firstMatch(this.deny, "read", [first[1]])!;
-        return {
-          verdict: "deny",
-          reason: `Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`,
-          rule: rule.source,
-        };
+        return refuse(`Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`, rule.source);
       }
-      // The search reads the files, not the directory entry: judge those instead.
-      const reached = named.filter(([file]) => !ignored.has(file)).map(([, relativePath]) => plain(relativePath));
-      if (reached.length) {
-        const own = values.findIndex((subject) => subject.allow[0] === where);
-        if (own >= 0) values.splice(own, 1);
-        values.push(...reached);
-      }
+      reached.push({ where, subjects: named.filter(([file]) => !ignored.has(file)).map(([, relativePath]) => plain(relativePath)) });
     }
-    return null;
+    return { refused: null, reached };
   }
 
   async decide(
@@ -436,9 +428,25 @@ export class BuiltinDecider implements Decider {
 
     // Claude's Grep runs `rg --hidden`: dotfiles too, symlinks not followed, .gitignore honoured.
     if (operation.kind === "read" && operation.recursive) {
-      const refused = await this.reach(operation.paths, { hidden: true, follow: false, respectsIgnore: true }, context.workspaceRoot, values);
+      const { refused, reached } = await this.reach(operation.paths, { hidden: true, follow: false, respectsIgnore: true }, context.workspaceRoot);
       if (refused) return refused;
+      // The search reads the files, not the directory entry: the allow list must cover those.
+      for (const { where, subjects: files } of reached) {
+        if (!files.length) continue;
+        const own = values.findIndex((subject) => subject.allow[0] === where);
+        if (own >= 0) values.splice(own, 1);
+        values.push(...files);
+      }
     }
+
+    // `grep -r`, `rg`, `diff -r`: a command that searches a directory reaches what is in it.
+    if (operation.kind === "exec")
+      for (const segment of parseCommand(operation.command).segments) {
+        const search = recursiveReadOf(segment.words.slice(segment.programIndex), operation.cwd);
+        if (!search) continue;
+        const { refused } = await this.reach(search.dirs, search, context.workspaceRoot);
+        if (refused) return refused;
+      }
 
     if (operation.kind === "exec") {
       // A command that names a file is a read of that file, whatever the file is called
