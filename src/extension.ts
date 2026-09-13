@@ -88,6 +88,7 @@ export { digest, id as newId, now, secret, canonical, equal } from "./store/inde
 export { globToRegExp } from "./decide/match.ts";
 export { sedObjection } from "./decide/sed.ts";
 export { canonicalPath } from "./core/gateway.ts";
+export { reachableFiles, REACH_LIMIT } from "./core/reach.ts";
 export type { RunRecord, SessionRecord, OperationRecord } from "./core/records.ts";
 export type { KeyRecord, Principal, Scope } from "./core/keys.ts";
 export { Keys } from "./core/keys.ts";
