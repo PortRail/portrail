@@ -76,6 +76,8 @@ test("home, root, and anything holding Portrail's own data cannot be a workspace
   const withDot = realTmp("dot-");
   mkdirSync(join(withDot, ".portrail"));
   assert.match(refuseWorkspaceRoot(withDot) ?? "", /\.portrail/);
+  for (const system of ["/usr", "/etc", "/usr/local", "/private/etc", "/System/Library", "/opt", "/bin"])
+    assert.match(refuseWorkspaceRoot(system) ?? "", /system directory/, system);
 });
 
 test("credential stores, tool logins and shell history are protected everywhere", () => {

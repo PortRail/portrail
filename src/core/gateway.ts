@@ -1015,11 +1015,19 @@ export function containOperation(
   return { operation, refused: null, root };
 }
 
+/** Where the operating system keeps itself; nothing there is anyone's project. */
+const SYSTEM_ROOTS = [
+  "/usr", "/etc", "/bin", "/sbin", "/opt", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev", "/root", "/cores",
+  "/System", "/Library", "/Applications", "/private/etc",
+];
+
 /** Why a directory may not become a workspace, or null. */
 export function refuseWorkspaceRoot(declared: string, dataDir?: string): string | null {
   const canonical = safeRealpath(declared);
   const home = safeRealpath(homedir());
   if (canonical === "/" || canonical === dirname(canonical)) return "The filesystem root cannot be a workspace.";
+  if (SYSTEM_ROOTS.some((system) => isWithin(canonical, safeRealpath(system))))
+    return "A system directory cannot be a workspace. Choose a project folder.";
   if (canonical === home) return "Your home directory cannot be a workspace. Enrol a project folder inside it.";
   if (isWithin(home, canonical)) return "A directory above your home directory cannot be a workspace.";
   for (const p of protectedPaths(dataDir))
