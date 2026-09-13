@@ -4,8 +4,10 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assemble, startDaemon } from "../src/daemon.ts";
-import { script, untilDone } from "./helpers.ts";
+import { assemble, databasePath, startDaemon } from "../src/daemon.ts";
+import { Store } from "../src/store/index.ts";
+import { dataDirectory, ensurePrivateDirectory } from "../src/store/paths.ts";
+import { daysAgo, script, seedSession, untilDone } from "./helpers.ts";
 
 const home = () => mkdtempSync(join(tmpdir(), "portrail-daemon-"));
 const boot = (h: string, extra: Record<string, unknown> = {}) =>
@@ -96,4 +98,78 @@ test("an extension whose event listener throws is reported on stderr and the run
     if (previous === undefined) delete process.env.PORTRAIL_EXTENSION;
     else process.env.PORTRAIL_EXTENSION = previous;
   }
+});
+
+/** A home whose database already holds one session that is long past the retention window. */
+function homeWithOldSession() {
+  const h = home();
+  const store = new Store(databasePath(ensurePrivateDirectory(dataDirectory(h))));
+  seedSession(store, "old", daysAgo(40), "succeeded");
+  store.close();
+  return h;
+}
+
+function withExtension<T>(source: string, body: () => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), "portrail-ext-"));
+  writeFileSync(join(dir, "ext.mjs"), source);
+  const previous = process.env.PORTRAIL_EXTENSION;
+  process.env.PORTRAIL_EXTENSION = join(dir, "ext.mjs");
+  return body().finally(() => {
+    if (previous === undefined) delete process.env.PORTRAIL_EXTENSION;
+    else process.env.PORTRAIL_EXTENSION = previous;
+  });
+}
+
+test("assemble prunes what is past the retention window before it listens", async () => {
+  const daemon = await assemble({
+    home: homeWithOldSession(),
+    fake: true,
+    noExtension: true,
+  });
+  try {
+    assert.equal(daemon.store.get("session", "old"), undefined);
+    assert.equal(daemon.store.count("run", { sessionId: "old" }), 0);
+    assert.equal(daemon.store.events("old").length, 0);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("an extension is told the retention cutoff at start, and its failure is reported, not fatal", async () => {
+  await withExtension(
+    `export default { name: "sweeper", version: "0", onRetention(cutoff, host) { host.store.put("swept", { id: "last", cutoff }); } };`,
+    async () => {
+      const daemon = await assemble({ home: homeWithOldSession(), fake: true });
+      try {
+        const swept = daemon.store.get<{ id: string; cutoff: string }>("swept", "last");
+        assert.ok(swept, "the extension ran with the host");
+        assert.ok(
+          swept.cutoff > daysAgo(31) && swept.cutoff < daysAgo(29),
+          swept.cutoff,
+        );
+        assert.equal(daemon.store.get("session", "old"), undefined);
+      } finally {
+        await daemon.close();
+      }
+    },
+  );
+
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (...parts: unknown[]) => errors.push(parts.join(" "));
+  try {
+    await withExtension(
+      `export default { name: "sweeper", version: "0", onRetention() { throw new Error("pro bug"); } };`,
+      async () => {
+        const daemon = await assemble({ home: homeWithOldSession(), fake: true });
+        await daemon.close();
+      },
+    );
+  } finally {
+    console.error = original;
+  }
+  assert.ok(
+    errors.some((line) => /sweeper: onRetention failed.*pro bug/.test(line)),
+    errors.join("\n"),
+  );
 });

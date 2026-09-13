@@ -4,6 +4,7 @@
  */
 export {
   assemble,
+  sweep,
   startDaemon,
   runningDaemon,
   type Daemon,

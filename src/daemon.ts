@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig, type PortrailConfig } from "./config.ts";
-import { Gateway } from "./core/gateway.ts";
+import { Gateway, type RetentionResult } from "./core/gateway.ts";
 import { Keys } from "./core/keys.ts";
 import { BuiltinDecider } from "./decide/builtin.ts";
 import { loadExtension } from "./extension-loader.ts";
@@ -48,6 +48,29 @@ export interface Daemon {
 }
 
 export const databasePath = (dataDir: string) => resolve(dataDir, "portrail.sqlite");
+
+/**
+ * One retention pass: the core removes what is past the window, then the extension
+ * gets the same cutoff for its own kinds. An extension bug is reported, never fatal.
+ */
+export async function sweep(
+  gateway: Gateway,
+  retentionDays: number,
+  extension: Extension | null,
+  host: ExtensionHost,
+): Promise<RetentionResult> {
+  const removed = gateway.retention(retentionDays);
+  if (extension?.onRetention) {
+    try {
+      await extension.onRetention(removed.cutoff, host);
+    } catch (error) {
+      console.error(
+        `${extension.name}: onRetention failed: ${(error as Error).message}`,
+      );
+    }
+  }
+  return removed;
+}
 
 /** Build everything but do not listen yet. */
 export async function assemble(
@@ -130,6 +153,9 @@ export async function assemble(
     });
   }
 
+  // Weeks of sessions may have piled up while no daemon ran; clear them before listening.
+  await sweep(gateway, config.retentionDays, extension, host);
+
   // Shallow probes only, so nothing periodic (health checks, the CLI) ever costs inference.
   let cachedAgents: { at: number; value: ProviderStatus[] } | null = null;
   const agents = async (deep = false) => {
@@ -165,7 +191,7 @@ export async function assemble(
   });
 
   const retention = setInterval(
-    () => gateway.retention(config.retentionDays),
+    () => void sweep(gateway, config.retentionDays, extension, host),
     60 * 60 * 1000,
   );
   retention.unref();
