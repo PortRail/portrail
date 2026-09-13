@@ -89,8 +89,10 @@ is to be the point where that attempt is seen and can be refused.
 - **It does not protect against a malicious operator.** Anyone with a `runs:write` key can
   make the agent do anything the rules allow. Treat keys as you would SSH keys.
 - **It does not encrypt at rest.** Prompts, output and diffs are stored in plain SQLite
-  under `~/.portrail` (mode 0700), alongside the approval-link and webhook signing secrets.
-  Back it up privately. Claude Code additionally writes its own full transcript of every
+  under `~/.portrail` (mode 0700), alongside the hashed API keys and, while the gateway
+  runs, `daemon.json` with the token that lets this machine answer a parked operation. A
+  copy of that directory is a copy of that ability: back it up privately and rely on
+  full-disk encryption. Claude Code additionally writes its own full transcript of every
   run into `~/.claude/projects/`, as it does for any session — Portrail cannot turn that
   off without losing the login, so know it is there.
 - **It has no cost ceiling by default.** Set `run.maxBudgetUsd` in `config.json` to cap
