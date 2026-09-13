@@ -46,6 +46,9 @@ export interface CreateRunInput {
   metadata?: Record<string, unknown>;
 }
 
+/** The answer to any question asked on behalf of a run that is over. */
+const NOT_ACTIVE: Decision = { verdict: "deny", reason: "The run is no longer active." };
+
 interface Worker {
   epoch: string;
   abort: AbortController;
@@ -382,9 +385,7 @@ export class Gateway extends EventEmitter {
         },
         runId,
       );
-      this.parking.drain("The run ended before a decision arrived.", (operationId) =>
-        run.operationIds.includes(operationId),
-      );
+      this.parking.drain("The run ended before a decision arrived.", (operationId) => this.belongsTo(operationId, runId));
     });
   }
 
@@ -560,6 +561,24 @@ export class Gateway extends EventEmitter {
 
   // ------------------------------------------------------------ decisions
 
+  /** True once this worker may no longer act for the run: over, cancelling, superseded or aborted. */
+  private inactive(runId: string, workerEpoch: string): boolean {
+    const run = this.store.get<RunRecord>("run", runId);
+    const worker = this.workers.get(runId);
+    return (
+      !run ||
+      run.workerEpoch !== workerEpoch ||
+      TERMINAL_STATES.has(run.state) ||
+      run.state === "cancelling" ||
+      worker?.abort.signal.aborted === true
+    );
+  }
+
+  /** Looked up at drain time, so an operation registered a moment ago is drained too. */
+  private belongsTo(operationId: string, runId: string): boolean {
+    return this.store.get<OperationRecord>("operation", operationId)?.runId === runId;
+  }
+
   /**
    * The single place a provider's "may I?" is answered.
    *
@@ -573,9 +592,8 @@ export class Gateway extends EventEmitter {
     operation: Operation,
     workspace: Workspace,
   ): Promise<Decision> {
+    if (this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
     const run = this.run(runId);
-    if (run.workerEpoch !== workerEpoch || TERMINAL_STATES.has(run.state) || run.state === "cancelling")
-      return { verdict: "deny", reason: "The run is no longer active." };
 
     const record: OperationRecord = {
       id: operation.id,
@@ -648,6 +666,9 @@ export class Gateway extends EventEmitter {
     let decision: Decision;
     try {
       decision = await this.decider.decide(operation, context);
+      // The decider took its time; the run may have been cancelled meanwhile, and a
+      // yes to a run that is over must never reach the agent.
+      if (decision.verdict !== "deny" && this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
     } catch (error) {
       return settle(
         { verdict: "deny", reason: `The decider failed: ${(error as Error).message}` },
@@ -678,6 +699,7 @@ export class Gateway extends EventEmitter {
       reason: "No decision arrived before the deadline. Refused to be safe.",
     }));
 
+    if (answered.verdict === "allow" && this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
     const decidedBy = this.store.get<OperationRecord>("operation", operation.id)?.decidedBy;
     this.store.tx(() => {
       const latest = this.run(runId);
@@ -740,7 +762,7 @@ export class Gateway extends EventEmitter {
     }
     this.store.put("run", { ...run, cancellationRequested: true });
     this.setState(runId, "cancelling");
-    this.parking.drain("The run was cancelled.", (operationId) => run.operationIds.includes(operationId));
+    this.parking.drain("The run was cancelled.", (operationId) => this.belongsTo(operationId, runId));
     worker.abort.abort();
     await worker.handle?.interrupt().catch(() => {});
 
