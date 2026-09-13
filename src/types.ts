@@ -50,11 +50,37 @@ export interface WriteOperation extends OperationBase {
   changes: FileChange[];
 }
 
+/** One include or exclude pattern a search tool was given, in the order it was given. */
+export interface SearchGlob {
+  pattern: string;
+  /** A leading `!` (rg) or `--exclude` (grep): files this matches are not opened. */
+  exclude: boolean;
+  /**
+   * How the tool reads the pattern. rg: a glob without a slash matches a name at any
+   * depth, one with a slash is anchored to the working directory, braces expand.
+   * grep: a shell glob against the base name. grep-dir: `--exclude-dir`, directories only.
+   */
+  dialect: "rg" | "grep" | "grep-dir";
+  /** `--iglob`: the tool itself matches without regard to case. */
+  ignoreCase?: boolean;
+}
+
+/** What a search was told to open; files it would never open are not held against it. */
+export interface SearchFilter {
+  globs: SearchGlob[];
+  /** `-t`/`--type` names, narrowing to the tool's own extension lists; unknown names narrow nothing. */
+  types: string[];
+  /** What happens to a file no glob matches: rg drops it once any include glob exists, else keeps it. */
+  unmatched: "keep" | "drop";
+}
+
 export interface ReadOperation extends OperationBase {
   kind: "read";
   paths: string[];
   /** A search over a directory: every file beneath it may be read, so every file is judged. */
   recursive?: boolean;
+  /** For a search: the filters it was given, so only files it would open are judged. */
+  filter?: SearchFilter;
 }
 
 export interface NetOperation extends OperationBase {
