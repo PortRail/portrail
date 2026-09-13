@@ -39,7 +39,11 @@ export type ProviderEvent =
   | { type: "warning"; message: string };
 
 export type RunOutcome = {
-  state: "succeeded" | "failed" | "cancelled";
+  /**
+   * `outcome_unknown`: the agent had the work and the provider lost contact before it
+   * reported back. The work may be half done; nothing is replayed.
+   */
+  state: "succeeded" | "failed" | "cancelled" | "outcome_unknown";
   summary: string;
 };
 

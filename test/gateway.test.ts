@@ -4,7 +4,8 @@ import { realpathSync } from "node:fs";
 import { Gateway } from "../src/core/gateway.ts";
 import { FakeProvider } from "../src/providers/fake/index.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
-import type { Decider } from "../src/extension.ts";
+import type { Decider, Decision } from "../src/extension.ts";
+import type { Provider } from "../src/providers/types.ts";
 import { script, testGateway, untilDone, tick } from "./helpers.ts";
 
 test("a run moves queued → starting → running → succeeded and its events are ordered", async () => {
@@ -311,4 +312,45 @@ test("a run left queued by a previous process is dispatched when the next proces
   await untilDone(reborn, second.id);
   assert.equal(reborn.run(second.id).state, "succeeded");
   await reborn.shutdown();
+});
+
+test("a provider that lost its agent leaves the run unknown and the session needing attention, keeping the provider's own account", async () => {
+  const lost: Provider = {
+    id: "fake",
+    probe: async () => ({ ready: true, detail: "stub" }) as never,
+    start: async (context) => {
+      context.emit({ type: "started", nativeSessionId: null });
+      context.emit({ type: "text", text: "partial work" } as never);
+      return {
+        nativeSessionId: () => null,
+        interrupt: async () => {},
+        steer: async () => {},
+        close() {},
+        done: Promise.resolve({ state: "outcome_unknown" as const, summary: "the agent process exited mid-turn" }),
+      };
+    },
+  };
+  const { gateway } = testGateway({ providers: new Map([["fake" as const, lost]]) });
+  const run = gateway.createRun({ workspace: "work", agent: "fake", prompt: "anything" });
+  await untilDone(gateway, run.id);
+  const final = gateway.run(run.id);
+  assert.equal(final.state, "outcome_unknown");
+  assert.equal(final.summary, "the agent process exited mid-turn", "the provider's reason, not the partial output");
+  assert.equal(gateway.session(run.sessionId).state, "attention_required");
+  await gateway.shutdown();
+});
+
+test("an allow that arrives after the run was cancelled is not delivered to the agent", async () => {
+  let release!: (decision: Decision) => void;
+  const slow: Decider = { name: "slow", decide: () => new Promise<Decision>((resolve) => (release = resolve)) };
+  const { gateway, events } = testGateway({ decider: slow });
+  const run = gateway.createRun({ workspace: "work", agent: "fake", prompt: script([{ exec: "npm test" }, { text: "after" }]) });
+  await new Promise<void>((resolve) => gateway.on("event", (event) => event.runId === run.id && event.type === "operation.requested" && resolve()));
+  await gateway.cancel(run.id, "changed my mind");
+  release({ verdict: "allow", reason: "too late" });
+  await untilDone(gateway, run.id);
+  assert.equal(gateway.run(run.id).state, "cancelled");
+  assert.ok(!events.some((event) => event.runId === run.id && event.type === "command.started"), "the agent never got a yes");
+  assert.ok(!events.some((event) => event.runId === run.id && event.type === "operation.decided" && event.data.verdict === "allow"), "no allow was recorded either");
+  await gateway.shutdown();
 });

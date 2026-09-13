@@ -169,3 +169,12 @@ test("a permission request is answered only with the entries that were judged an
   assert.ok(h.events.some((e) => e.type === "warning" && /cannot judge/.test((e as any).message)), "the refused request is visible in the run");
   handle.close();
 });
+
+test("a Codex that dies after the turn began leaves the outcome unknown, not failed", async () => {
+  const h = harness({ steps: [{ notify: "item/agentMessage/delta", params: { delta: "working…" } }, { exit: 3 }] }, () => ({ verdict: "allow", reason: "" }));
+  const handle = await h.provider.start(h.context);
+  const outcome = await handle.done;
+  assert.ok(h.events.some((event) => event.type === "started"), "the turn had begun");
+  assert.equal(outcome.state, "outcome_unknown");
+  assert.match(outcome.summary, /exited/);
+});
