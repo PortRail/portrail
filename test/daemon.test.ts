@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon } from "../src/daemon.ts";
-import { script } from "./helpers.ts";
+import { assemble, startDaemon } from "../src/daemon.ts";
+import { script, untilDone } from "./helpers.ts";
 
 const home = () => mkdtempSync(join(tmpdir(), "portrail-daemon-"));
 const boot = (h: string, extra: Record<string, unknown> = {}) => startDaemon({ home: h, port: 0, fake: true, noExtension: true, ...extra });
@@ -40,4 +40,27 @@ test("a start that cannot listen leaves neither lock nor daemon.json behind", as
   assert.match(again.url, /^http:\/\/127\.0\.0\.1:\d+$/, "the url names the port that was actually bound");
   assert.notEqual(again.url, "http://127.0.0.1:0");
   await again.close();
+});
+
+test("an extension whose event listener throws is reported on stderr and the run still completes", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "portrail-ext-"));
+  writeFileSync(join(dir, "ext.mjs"), `export default { name: "boom", version: "0", onEvent() { throw new Error("pro bug"); } };`);
+  const previous = process.env.PORTRAIL_EXTENSION;
+  process.env.PORTRAIL_EXTENSION = join(dir, "ext.mjs");
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (...parts: unknown[]) => errors.push(parts.join(" "));
+  try {
+    const daemon = await assemble({ home: home(), fake: true });
+    daemon.gateway.addWorkspace({ name: "work", root: mkdtempSync(join(tmpdir(), "portrail-ws-")) });
+    const run = daemon.gateway.createRun({ workspace: "work", agent: "fake", prompt: script([{ text: "hi" }]) });
+    await untilDone(daemon.gateway, run.id);
+    assert.equal(daemon.gateway.run(run.id).state, "succeeded");
+    assert.ok(errors.some((line) => /boom.*onEvent.*pro bug/.test(line)), errors.join("\n"));
+    await daemon.close();
+  } finally {
+    console.error = original;
+    if (previous === undefined) delete process.env.PORTRAIL_EXTENSION;
+    else process.env.PORTRAIL_EXTENSION = previous;
+  }
 });

@@ -11,7 +11,7 @@ import { CodexProvider } from "./providers/codex/index.ts";
 import { FakeProvider } from "./providers/fake/index.ts";
 import type { Provider, ProviderStatus } from "./providers/types.ts";
 import { createApp } from "./server/app.ts";
-import { secret, Store } from "./store/index.ts";
+import { secret, Store, type PortrailEvent } from "./store/index.ts";
 import { dataDirectory, ensurePrivateDirectory } from "./store/paths.ts";
 import type { AgentId } from "./types.ts";
 import { version } from "./runtime.ts";
@@ -102,7 +102,18 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
   };
   const decider = extension?.decider?.(host) ?? null;
   if (decider) gateway.useDecider(decider);
-  if (extension?.onEvent) gateway.on("event", extension.onEvent);
+  if (extension?.onEvent) {
+    // A bug in the extension must not take the free engine down with it.
+    const onEvent = extension.onEvent.bind(extension);
+    const name = extension.name;
+    gateway.on("event", (event: PortrailEvent) => {
+      try {
+        onEvent(event);
+      } catch (error) {
+        console.error(`${name}: onEvent failed for ${event.type}: ${(error as Error).message}`);
+      }
+    });
+  }
 
   // Shallow probes only, so nothing periodic (health checks, the CLI) ever costs inference.
   let cachedAgents: { at: number; value: ProviderStatus[] } | null = null;
