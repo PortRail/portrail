@@ -51,7 +51,7 @@ Scopes: runs:write runs:read approvals:decide workspaces:admin policy:admin keys
 portrail workspace list [--json]
 portrail workspace remove <name>
 A workspace is a folder the agent may work in. Home, root and Portrail's own data directory are refused.`,
-  run: `portrail run "<prompt>" [--agent codex|claude] [--workspace <name>] [--key prt_...] [--json]
+  run: `portrail run [--json] "<prompt>" [--agent codex|claude] [--workspace <name>] [--key prt_...]
 Sends one request to the running gateway and streams the result. Reads PORTRAIL_KEY if --key is absent.
 When an operation matches decide.ask, run asks you "Allow this once? [y/N]" right here (or, without a
 terminal, tells you to answer with portrail approve/deny). Nothing is remembered; no rule is written.

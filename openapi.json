@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Portrail",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "An HTTP API in front of Codex and Claude Code running on your own machine. Every route under /v1 needs a bearer API key.",
     "license": {
       "name": "MIT"
@@ -73,7 +73,8 @@
               "failed",
               "cancelled",
               "outcome_unknown"
-            ]
+            ],
+            "description": "outcome_unknown also results when Portrail loses contact with the agent process after the turn began."
           },
           "model": {
             "type": ["string", "null"]
@@ -185,7 +186,7 @@
           "metadata": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Free-form fields stored on the run and returned with it; Portrail Pro reads `callback` from here too."
+            "description": "Free-form fields stored on the run and returned with it; Portrail Pro reads `callback` from here too. At most 16 KiB when serialised."
           }
         },
         "required": ["prompt"]
@@ -432,7 +433,7 @@
     "/v1/runs": {
       "post": {
         "summary": "Start a run.",
-        "description": "Without wait: 202 and the queued run. With wait: 200 and the finished run if it ended in time, else 202.",
+        "description": "Without wait: 202 and the queued run. With wait: 200 and the finished run if it ended in time, else 202. Fields are type-checked, not coerced. An idempotent retry returns the run as it stands now. metadata may be at most 16 KiB when serialised.",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -524,6 +525,9 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "metadata exceeds 16 KiB, or the body exceeds 1 MiB."
           }
         },
         "security": [

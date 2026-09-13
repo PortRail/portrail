@@ -3,7 +3,10 @@
 ```ts
 import { PortrailClient } from "portrail/client";
 
-const client = new PortrailClient({ baseUrl: "http://127.0.0.1:7431", token: process.env.PORTRAIL_KEY! });
+const client = new PortrailClient({
+  baseUrl: "http://127.0.0.1:7431",
+  token: process.env.PORTRAIL_KEY!,
+});
 
 const run = await client.runs.create({
   agent: "codex",
@@ -25,7 +28,12 @@ console.log(final.state, final.summary);
   generated otherwise.
 - `runs.events(id, { after, signal, reconnect })` — resumable; reconnects with backoff
   and never yields an event twice.
-- `runs.wait(id)` — poll until done, for callers that cannot hold a stream.
+- `runs.wait(id, { intervalMs, signal })` — poll until done, for callers that cannot hold a
+  stream; an aborted `signal` ends it at once with the signal's reason.
+
+A caller's `signal` is combined with the request timeout, never substituted for it.
+`Idempotency-Key` is sent for `runs.create` only — the one route the server replays.
+
 - `runs.cancel`, `runs.reply`, `sessions.*`, `workspaces.*`, `agents.list`, `keys.*`.
 
 The client refuses plain `http` to anything but loopback, so a key cannot be sent in the
