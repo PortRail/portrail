@@ -268,3 +268,12 @@ test("a command that names a file is judged as a read of that file, by its real 
   assert.equal((await judge("head confidential/plan.txt", custom)).verdict, "deny");
   assert.equal((await judge("ls confidential", custom)).verdict, "allow", "naming the directory is not reading the files in it");
 });
+
+test("a differently cased secret or program is the same secret or program", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of ["SUDO ls", "Curl http://x", "cat .ENV", "git show HEAD:.ENV", "cat ~/.Aws/Credentials", "CAT ~/.SSH/ID_RSA"]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+  }
+});

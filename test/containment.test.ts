@@ -47,10 +47,10 @@ test("a dangling symlink pointing outside the workspace is refused, and a symlin
   });
 }
 
-test("path rules ignore case, because the filesystem does", () => {
+test("rules ignore case, because the filesystem the commands run on does", () => {
   assert.ok(globToRegExp(".env*", true).test(".ENV.local"));
   assert.ok(globToRegExp("**/*.pem", true).test("certs/SERVER.PEM"));
-  assert.ok(!globToRegExp("npm test*", false).test("NPM TEST"), "commands stay case-sensitive");
+  assert.ok(globToRegExp("npm test*", false).test("NPM TEST"), "commands too: `CAT .ENV` opens .env");
 });
 
 test("an operation that declares nothing is refused, except a read which means the workspace root", async () => {
