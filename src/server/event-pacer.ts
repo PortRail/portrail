@@ -1,3 +1,7 @@
+/**
+ * Returns true only when it wrote one event to the wire. What a sink skips is its own
+ * business and costs nothing against the allowance.
+ */
 type Sink = () => boolean;
 type Window = {
   sinks: Set<Sink>;
