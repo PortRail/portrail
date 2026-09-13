@@ -4,6 +4,7 @@ import { ensure, fail, PortrailError } from "../contracts/errors.ts";
 import type { Gateway } from "../core/gateway.ts";
 import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
+import { obj, optNum, optStr, str } from "./body.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
 import { digest, equal, id as newId, now, type Store, type PortrailEvent } from "../store/index.ts";
 import { TERMINAL_STATES, type AgentId } from "../types.ts";
@@ -97,9 +98,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     });
   });
 
-  app.setErrorHandler((error: any, _request, reply) => {
+  app.setErrorHandler((error: any, request, reply) => {
     if (error instanceof PortrailError) return reply.code(error.status).send(error.toJSON());
     const status = error.statusCode === 413 ? 413 : error.statusCode === 400 ? 400 : error.statusCode === 415 ? 415 : 500;
+    const requestId = newId("req");
+    // The client gets an id and a bland message; the operator gets the id and the cause.
+    if (status === 500) console.error(`${requestId} ${request.method} ${request.url} ${error?.stack ?? error}`);
     return reply.code(status).send({
       error: {
         code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_REQUEST" : status === 415 ? "UNSUPPORTED_MEDIA_TYPE" : "INTERNAL_ERROR",
@@ -108,7 +112,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
             ? "Portrail could not complete the request."
             : (error.message ?? "Malformed request."),
         retryable: false,
-        requestId: newId("req"),
+        requestId,
       },
     });
   });
@@ -117,10 +121,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "No such route.", retryable: false } }),
   );
 
-  const bearer = (request: FastifyRequest) => {
-    const header = request.headers.authorization;
-    return header?.startsWith("Bearer ") ? header.slice(7).trim() : undefined;
-  };
+  // The scheme is case-insensitive (RFC 7235); proxies and clients spell it as they like.
+  const bearer = (request: FastifyRequest) => /^bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
 
   /** Authenticate and check one scope. Attaches the principal to the request. */
   const auth = (request: FastifyRequest, scope: Scope): Principal => {
@@ -135,7 +137,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     return principal;
   };
 
-  const body = (request: FastifyRequest) => (request.body ?? {}) as Record<string, any>;
+  const body = (request: FastifyRequest): Record<string, unknown> => {
+    const value = request.body ?? {};
+    ensure(typeof value === "object" && !Array.isArray(value), 400, "INVALID_REQUEST", "The request body must be a JSON object.");
+    return value as Record<string, unknown>;
+  };
   const params = (request: FastifyRequest) => request.params as Record<string, string>;
 
   /**
@@ -143,7 +149,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
    * stored response; the same key with a different body is a conflict. Automations
    * retry, and a retried "start a run" must never start two.
    */
-  function idempotent<T>(request: FastifyRequest, principal: string, execute: () => T): T {
+  function idempotent<T extends { id: string }>(request: FastifyRequest, principal: string, execute: () => T, recall: (stored: { id: string }) => T): T {
     const key = request.headers["idempotency-key"];
     if (key === undefined) return execute();
     ensure(
@@ -165,12 +171,13 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
           "IDEMPOTENCY_CONFLICT",
           "This Idempotency-Key was already used with a different request body.",
         );
-        return JSON.parse(previous.response) as T;
+        // Only the id is remembered; the caller reads the current state, not a stale copy.
+        return recall(JSON.parse(previous.response) as { id: string });
       }
       const result = execute();
       store.db
         .prepare("INSERT INTO commands VALUES(?,?,?,?,?,?)")
-        .run(principal, route, key, hash, JSON.stringify(result), now());
+        .run(principal, route, key, hash, JSON.stringify({ id: result.id }), now());
       return result;
     });
   }
@@ -210,22 +217,23 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       "wait must be 0–3600 seconds.",
     );
 
-    const run = idempotent(request, principal.keyId, () =>
-      gateway.createRun({
-        sessionId: input.session,
-        workspace: input.workspace,
-        agent: input.agent as AgentId | undefined,
-        prompt: String(input.prompt ?? ""),
-        model: input.model,
-        maxSeconds: input.maxSeconds,
-        keyId: principal.keyId,
-        // Fields the free core carries for Pro: callback URL and anything under metadata.
-        metadata: {
-          ...(input.metadata && typeof input.metadata === "object" ? input.metadata : {}),
-          ...(typeof input.callback === "string" ? { callback: input.callback } : {}),
-        },
-      }),
-    );
+    // Validate before the idempotency lookup, so a malformed retry cannot replay a stored run.
+    const callback = optStr(input, "callback");
+    const create = {
+      sessionId: optStr(input, "session"),
+      workspace: optStr(input, "workspace"),
+      agent: optStr(input, "agent") as AgentId | undefined,
+      prompt: optStr(input, "prompt") ?? "",
+      model: optStr(input, "model"),
+      maxSeconds: optNum(input, "maxSeconds"),
+      keyId: principal.keyId,
+      // Fields the free core carries for Pro: callback URL and anything under metadata.
+      metadata: {
+        ...(obj(input, "metadata", { maxBytes: 16 * 1024 }) ?? {}),
+        ...(callback !== undefined ? { callback } : {}),
+      },
+    };
+    const run = idempotent(request, principal.keyId, () => gateway.createRun(create), ({ id }) => gateway.run(id));
 
     if (!wait) return reply.code(202).send(runView(run));
 
@@ -274,13 +282,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   app.post(`${API_PREFIX}/runs/:runId/reply`, async (request) => {
     auth(request, "runs:write");
-    await gateway.steer(params(request).runId!, String(body(request).text ?? ""));
+    await gateway.steer(params(request).runId!, str(body(request), "text"));
     return runView(gateway.run(params(request).runId!));
   });
 
   app.get(`${API_PREFIX}/runs/:runId/operations`, async (request) => {
     auth(request, "runs:read");
-    return { items: gateway.listOperations({ runId: params(request).runId! }) };
+    const run = gateway.run(params(request).runId!);
+    return { items: gateway.listOperations({ runId: run.id }) };
   });
 
   // ------------------------------------------------------- local answers
@@ -295,7 +304,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     ensure(equal(typeof given === "string" ? given : "", expected), 403, "FORBIDDEN", "Answers are accepted only from this machine (X-Portrail-Local from daemon.json).");
     // Belt and braces: even with the token, the connection itself must be local.
     const from = request.socket?.remoteAddress ?? "";
-    ensure(from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1" || from === "", 403, "FORBIDDEN", "Answers are accepted only over the loopback interface.");
+    ensure(from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1", 403, "FORBIDDEN", "Answers are accepted only over the loopback interface.");
   };
 
   app.get(`${API_PREFIX}/operations/pending`, async (request) => {
@@ -437,7 +446,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   app.post(`${API_PREFIX}/workspaces`, async (request, reply) => {
     auth(request, "workspaces:admin");
     const input = body(request);
-    return reply.code(201).send(gateway.addWorkspace({ name: String(input.name ?? ""), root: String(input.root ?? "") }));
+    return reply.code(201).send(gateway.addWorkspace({ name: str(input, "name"), root: str(input, "root") }));
   });
   app.delete(`${API_PREFIX}/workspaces/:ref`, async (request, reply) => {
     auth(request, "workspaces:admin");
@@ -463,9 +472,9 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     auth(request, "keys:admin");
     const input = body(request);
     const created = keys.create({
-      name: String(input.name ?? ""),
-      scopes: input.scopes,
-      expiresInDays: input.expiresInDays ?? null,
+      name: str(input, "name"),
+      scopes: input.scopes as string[] | undefined,
+      expiresInDays: optNum(input, "expiresInDays") ?? null,
       policy: input.policy,
     });
     // The only time the token is ever visible.

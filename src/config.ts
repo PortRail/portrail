@@ -28,6 +28,9 @@ export interface PortrailConfig {
  * anything unmatched is denied. Put a pattern in `ask` to be asked at the terminal
  * instead; Pro turns that into approvals from anywhere, by anyone, with a record.
  */
+/** How long a run may take, in seconds: the same bounds for config.json and the API. */
+export const RUN_MAX_SECONDS = { min: 30, max: 4 * 3600 } as const;
+
 /** A command with and without arguments: `npm test` and `npm test -- x`, never `npm testx`. */
 const plain = (command: string) => [`exec:${command}`, `exec:${command} *`];
 /** A package script by name, with arguments, and its `name:variant` forms (`test:unit`). */
@@ -261,8 +264,8 @@ export function validateConfig(input: unknown): PortrailConfig {
     invalid("listen.port must be a port from 1 to 65535.");
   if (!["codex", "claude"].includes(merged.defaultAgent))
     invalid('defaultAgent must be "codex" or "claude".');
-  if (!Number.isInteger(merged.run.maxSeconds) || merged.run.maxSeconds < 30)
-    invalid("run.maxSeconds must be an integer of at least 30.");
+  if (!Number.isInteger(merged.run.maxSeconds) || merged.run.maxSeconds < RUN_MAX_SECONDS.min || merged.run.maxSeconds > RUN_MAX_SECONDS.max)
+    invalid(`run.maxSeconds must be an integer from ${RUN_MAX_SECONDS.min} to ${RUN_MAX_SECONDS.max}.`);
   if (!Number.isInteger(merged.run.maxConcurrent) || merged.run.maxConcurrent < 1)
     invalid("run.maxConcurrent must be at least 1.");
   if (merged.run.maxBudgetUsd !== null && !(typeof merged.run.maxBudgetUsd === "number" && merged.run.maxBudgetUsd > 0))
