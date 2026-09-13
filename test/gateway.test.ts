@@ -45,21 +45,22 @@ test("denied operations do not run, and the decision is recorded with its rule",
   const run = gateway.createRun({
     workspace: "work",
     agent: "fake",
-    prompt: script([{ exec: "rm -rf /" }, { exec: "npm test" }, { write: ".env" }]),
+    prompt: script([{ exec: "rm -rf build" }, { exec: "npm test" }, { write: ".env" }, { exec: "rm -rf /" }]),
   });
   await untilDone(gateway, run.id);
 
   const decided = events.filter((e) => e.runId === run.id && e.type === "operation.decided");
   assert.deepEqual(
     decided.map((e) => e.data.verdict),
-    ["deny", "allow", "deny"],
+    ["deny", "allow", "deny", "deny"],
   );
   assert.equal(decided[0]?.data.rule, "exec:rm -rf*");
   assert.equal(decided[2]?.data.rule, "write:.env*");
+  assert.equal(decided[3]?.data.decidedBy, "portrail:containment", "a path outside the workspace never reaches a rule");
   const commands = events.filter((e) => e.runId === run.id && e.type === "command.started");
   assert.equal(commands.length, 1, "only the allowed command started");
   const summary = gateway.run(run.id).summary ?? "";
-  assert.equal((summary.match(/refused:/g) ?? []).length, 2, "the agent reported both refusals");
+  assert.equal((summary.match(/refused:/g) ?? []).length, 3, "the agent reported every refusal");
   await gateway.shutdown();
 });
 

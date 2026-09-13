@@ -7,7 +7,7 @@ import { canonicalPath, containOperation, protectedPaths, refuseWorkspaceRoot } 
 import { globToRegExp } from "../src/decide/match.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import type { Operation, ReadOperation } from "../src/types.ts";
+import type { ExecOperation, Operation, ReadOperation } from "../src/types.ts";
 
 const base = { id: "op", sessionId: "s", runId: "r", workspaceId: "w", agent: "codex" as const, requestedAt: "" };
 const realTmp = (prefix: string) => mkdtempSync(join(tmpdir(), prefix));
@@ -135,6 +135,58 @@ test("read-only compound commands of the kind Codex composes pass the free defau
     assert.equal(decision.verdict, "deny", command);
     assert.match(decision.reason, /environment assignment/);
   }
+});
+
+test("every path a command names must lie inside the workspace, judged by its real path", () => {
+  const root = realTmp("ws-");
+  const outside = realTmp("outside-");
+  const home = homedir();
+  mkdirSync(join(root, "src", "bin"), { recursive: true });
+  mkdirSync(join(root, "sub"));
+  writeFileSync(join(root, "src", "bin", "cli.ts"), "");
+  writeFileSync(join(root, "src", "a.ts"), "");
+  writeFileSync(join(root, "README.md"), "");
+  writeFileSync(join(outside, "victim.txt"), "secret");
+  symlinkSync(join(outside, "victim.txt"), join(root, "escape.txt"));
+  symlinkSync(join(home, ".ssh"), join(root, "sub", "link-to-ssh"));
+  const contain = (command: string, cwd = root) => containOperation({ ...base, kind: "exec", command, cwd }, root);
+  const refused = (command: string, cwd = root) => contain(command, cwd).refused ?? "";
+
+  for (const command of [
+    "cat /etc/passwd",
+    "ls ~/Documents",
+    `npm test --prefix ${outside}`,
+    "sort -o/tmp/x README.md",
+    "git log --output=/tmp/x",
+    "cat ../../etc/passwd",
+    "cat escape.txt",
+  ]) assert.match(refused(command), /outside the workspace/, command);
+  // A directory that holds protected places is refused for holding them, whichever check sees it first.
+  for (const command of ["grep -r X ~", `rg -uuu X ${home}`, "find ~ -name config", "ls -la /"])
+    assert.match(refused(command), /outside the workspace|protected everywhere/, command);
+  for (const command of ["diff ~/.zsh_history ~/.bash_history", "cat ~/.config/gh/hosts.yml", "cat sub/link-to-ssh/id_rsa"])
+    assert.match(refused(command), /protected everywhere/, command);
+
+  for (const command of [
+    "rg -n '/api/v1' src",
+    "sed -n '/^import/,/^$/p' src/a.ts",
+    "cat src/bin/cli.ts",
+    "/usr/bin/env node --version",
+    "cat README.md | head -50",
+    'git commit -m "fix: handle ../x in paths"',
+    "head -c 16 /dev/urandom",
+    "echo https://github.com/x/y",
+    "git diff HEAD~1..HEAD -- src",
+    "npm test -- test/a.test.ts",
+    "tsc -p tsconfig.json",
+    "wc -l README.md",
+  ]) assert.equal(contain(command).refused, null, command);
+  assert.equal(contain("ls ..", join(root, "sub")).refused, null, "the parent of a subdirectory is still the workspace");
+  assert.equal(contain("cat ../README.md", join(root, "sub")).refused, null);
+
+  // The files a command names travel with the operation, canonical, so the rules can judge them as reads.
+  const named = contain("cat README.md src/bin/cli.ts nonexistent").operation as ExecOperation;
+  assert.deepEqual(named.paths?.sort(), [join(root, "README.md"), join(root, "src", "bin", "cli.ts")].map((p) => realpathSync.native(p)).sort());
 });
 
 test("a command's working directory and the paths in its arguments are held against the protected list", async () => {
