@@ -9,7 +9,12 @@ export {
   type Daemon,
   type DaemonOptions,
 } from "./daemon.ts";
-export { Gateway, type GatewayOptions, type CreateRunInput } from "./core/gateway.ts";
+export {
+  Gateway,
+  type GatewayOptions,
+  type CreateRunInput,
+  type RetentionResult,
+} from "./core/gateway.ts";
 export { createApp, runView, type ServerOptions } from "./server/app.ts";
 export {
   Store,

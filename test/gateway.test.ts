@@ -6,7 +6,14 @@ import { FakeProvider } from "../src/providers/fake/index.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
 import type { Decider, Decision } from "../src/extension.ts";
 import type { Provider } from "../src/providers/types.ts";
-import { script, testGateway, untilDone, tick } from "./helpers.ts";
+import {
+  daysAgo,
+  script,
+  seedSession,
+  testGateway,
+  untilDone,
+  tick,
+} from "./helpers.ts";
 
 test("a run moves queued → starting → running → succeeded and its events are ordered", async () => {
   const { gateway, events } = testGateway();
@@ -603,4 +610,45 @@ test("a decision answered by hand earlier in the same run reaches the decider as
   await untilDone(gateway, run.id);
   assert.deepEqual(seen, [0, 1], "the second question saw the first answer");
   await gateway.shutdown();
+});
+
+test("retention removes a session past the window with everything that hangs off it, and keeps recent or active ones", () => {
+  const { gateway, store } = testGateway();
+  seedSession(store, "old", daysAgo(40), "succeeded");
+  seedSession(store, "fresh", daysAgo(1), "succeeded");
+  seedSession(store, "busy", daysAgo(40), "running");
+  store.db
+    .prepare("INSERT INTO commands VALUES(?,?,?,?,?,?)")
+    .run("k", "POST /v1/runs", "old-key", "d", "{}", daysAgo(40));
+  store.db
+    .prepare("INSERT INTO commands VALUES(?,?,?,?,?,?)")
+    .run("k", "POST /v1/runs", "new-key", "d", "{}", daysAgo(1));
+
+  const removed = gateway.retention(30);
+  assert.deepEqual(
+    { ...removed, cutoff: undefined },
+    { sessions: 1, runs: 1, operations: 1, events: 2, commands: 1, cutoff: undefined },
+  );
+  assert.ok(
+    removed.cutoff > daysAgo(31) && removed.cutoff < daysAgo(29),
+    removed.cutoff,
+  );
+  assert.equal(store.get("session", "old"), undefined);
+  assert.equal(store.events("old").length, 0);
+  assert.ok(store.get("session", "fresh"), "recent sessions stay");
+  assert.ok(
+    store.get("run", "busy-run"),
+    "a session with an active run stays, however old",
+  );
+  assert.equal(
+    Number(
+      (store.db.prepare("SELECT COUNT(*) AS n FROM commands").get() as { n: number }).n,
+    ),
+    1,
+  );
+  const again = gateway.retention(30);
+  assert.deepEqual(
+    { ...again, cutoff: undefined },
+    { sessions: 0, runs: 0, operations: 0, events: 0, commands: 0, cutoff: undefined },
+  );
 });
