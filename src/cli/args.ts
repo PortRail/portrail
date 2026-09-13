@@ -8,7 +8,13 @@ export interface ParsedArgs {
  * A deliberately small parser: `--flag`, `--flag value`, `--flag=value`, `-v`.
  * Everything after `--` is positional. No dependency, no surprises.
  */
-export function parseArgs(argv: readonly string[]): ParsedArgs {
+/**
+ * Flags that never take a value. Without this list `--json "hello"` would read the
+ * prompt as the flag's value; with it, what follows a boolean flag is a positional.
+ */
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["json", "live", "insecure", "with-fake-agent", "follow", "f", "version", "help"]);
+
+export function parseArgs(argv: readonly string[], options: { booleans?: ReadonlySet<string> } = {}): ParsedArgs {
   const positional: string[] = [];
   const flags = new Map<string, string | true>();
   let passthrough = false;
@@ -28,6 +34,8 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       const equals = body.indexOf("=");
       if (equals >= 0) {
         flags.set(body.slice(0, equals), body.slice(equals + 1));
+      } else if (options.booleans?.has(body)) {
+        flags.set(body, true);
       } else {
         const next = argv[index + 1];
         if (next !== undefined && !next.startsWith("-")) {
