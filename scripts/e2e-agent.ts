@@ -102,13 +102,15 @@ const exists = existsSync(target);
 const content = exists ? readFileSync(target, "utf8") : null;
 const denied = decisions.filter((entry) => entry.decision.verdict === "deny");
 
-console.log(`\nfile created:       ${exists}`);
+// Every line below is a pass criterion; a FAIL names which one it was.
+console.log(`\noutcome succeeded:  ${outcome.state === "succeeded"}`);
+console.log(`file created:       ${exists}`);
 console.log(`file content ok:    ${content?.trim() === "hello from portrail"}`);
 console.log(`operations decided: ${decisions.length} (${decisions.filter((d) => d.operation.kind === "exec").length} exec, ${decisions.filter((d) => d.operation.kind === "write").length} write)`);
-console.log(`denials honoured:   ${denied.length > 0}`);
+console.log(`denial observed:    ${denied.length > 0}`);
 console.log(`event types seen:   ${[...new Set(events.map((event) => event.type))].join(", ")}`);
 
 rmSync(root, { recursive: true, force: true });
-const pass = exists && content?.trim() === "hello from portrail" && decisions.length > 0;
+const pass = outcome.state === "succeeded" && exists && content?.trim() === "hello from portrail" && decisions.length > 0 && denied.length > 0;
 console.log(`\n${pass ? "PASS" : "FAIL"}`);
 process.exit(pass ? 0 : 1);
