@@ -1,10 +1,4 @@
-import type {
-  AgentId,
-  Decision,
-  FileChange,
-  Operation,
-  Workspace,
-} from "../types.ts";
+import type { AgentId, Decision, FileChange, Operation, Workspace } from "../types.ts";
 
 export interface ProviderStatus {
   id: AgentId;

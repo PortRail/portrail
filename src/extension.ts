@@ -58,7 +58,11 @@ export interface ExtensionHost {
 
 export interface ExtensionCommand {
   description: string;
-  run(args: { positional: string[]; flags: Map<string, string | boolean>; dataDir: string }): Promise<number>;
+  run(args: {
+    positional: string[];
+    flags: Map<string, string | boolean>;
+    dataDir: string;
+  }): Promise<number>;
 }
 
 export interface Extension {

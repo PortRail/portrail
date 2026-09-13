@@ -19,7 +19,10 @@ test("start refuses an unknown tunnel kind before starting anything", async () =
   let started = 0;
   const home = mkdtempSync(join(tmpdir(), "portrail-start-"));
   await assert.rejects(
-    start(args("start", "--tunnel", "bogus", "--home", home, "--port", "0"), deps({ startDaemon: async () => (started++, {} as never) })),
+    start(
+      args("start", "--tunnel", "bogus", "--home", home, "--port", "0"),
+      deps({ startDaemon: async () => (started++, {} as never) }),
+    ),
     /Unknown tunnel "bogus"/,
   );
   assert.equal(started, 0);
@@ -29,7 +32,21 @@ test("start refuses an unknown tunnel kind before starting anything", async () =
 test("a tunnel that fails to open closes the daemon and leaves no lock behind", async () => {
   const home = mkdtempSync(join(tmpdir(), "portrail-start-"));
   await assert.rejects(
-    start(args("start", "--tunnel", "cloudflare", "--home", home, "--port", "0", "--with-fake-agent"), deps({ openTunnel: () => Promise.reject(new Error("cloudflared is not installed")) })),
+    start(
+      args(
+        "start",
+        "--tunnel",
+        "cloudflare",
+        "--home",
+        home,
+        "--port",
+        "0",
+        "--with-fake-agent",
+      ),
+      deps({
+        openTunnel: () => Promise.reject(new Error("cloudflared is not installed")),
+      }),
+    ),
     /not installed/,
   );
   assert.ok(!existsSync(join(home, "daemon.lock")), "the lock was released");

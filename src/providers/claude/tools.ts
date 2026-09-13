@@ -21,7 +21,8 @@ export function toolToOperation(
   base: OperationBase,
   workspaceRoot: string,
 ): Operation | null {
-  const str = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : undefined);
+  const str = (key: string) =>
+    typeof input[key] === "string" ? (input[key] as string) : undefined;
 
   switch (name) {
     case "Bash":
@@ -48,7 +49,9 @@ export function toolToOperation(
             path: str("file_path") ?? "",
             change: "update",
             ...(str("old_string") !== undefined && str("new_string") !== undefined
-              ? { diff: `--- ${str("file_path")}\n+++ ${str("file_path")}\n-${str("old_string")}\n+${str("new_string")}` }
+              ? {
+                  diff: `--- ${str("file_path")}\n+++ ${str("file_path")}\n-${str("old_string")}\n+${str("new_string")}`,
+                }
               : {}),
           },
         ],
@@ -63,17 +66,27 @@ export function toolToOperation(
       return { ...base, kind: "read", paths: [str("file_path") ?? ""] };
     case "Grep":
       // Content search: whatever lies under the directory can come back in the output.
-      return { ...base, kind: "read", recursive: true, paths: [str("path") ?? workspaceRoot] };
+      return {
+        ...base,
+        kind: "read",
+        recursive: true,
+        paths: [str("path") ?? workspaceRoot],
+      };
     case "Glob": {
       // Names only — but a pattern that starts elsewhere or climbs out is judged as that place.
       const from = str("path") ?? workspaceRoot;
       const pattern = str("pattern") ?? "";
       const paths = [from];
-      if (pattern.startsWith("/") || pattern.split("/").includes("..")) paths.push(resolve(from, pattern.split(/[*?[{]/)[0] ?? ""));
+      if (pattern.startsWith("/") || pattern.split("/").includes(".."))
+        paths.push(resolve(from, pattern.split(/[*?[{]/)[0] ?? ""));
       return { ...base, kind: "read", paths };
     }
     case "WebFetch":
-      return { ...base, kind: "net", ...(str("url") ? { url: str("url")!, host: safeHost(str("url")!) } : {}) };
+      return {
+        ...base,
+        kind: "net",
+        ...(str("url") ? { url: str("url")!, host: safeHost(str("url")!) } : {}),
+      };
     case "WebSearch":
       return { ...base, kind: "net", host: "web-search" };
     case "TodoWrite":

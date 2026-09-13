@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { CodexRpc, NativeError } from "../src/providers/codex/rpc.ts";
 
-const fixture = fileURLToPath(new URL("./fixtures/fake-app-server.mjs", import.meta.url));
-const spawnFake = (mode = "normal", extra: Partial<ConstructorParameters<typeof CodexRpc>[0]> = {}) =>
+const fixture = fileURLToPath(
+  new URL("./fixtures/fake-app-server.mjs", import.meta.url),
+);
+const spawnFake = (
+  mode = "normal",
+  extra: Partial<ConstructorParameters<typeof CodexRpc>[0]> = {},
+) =>
   new CodexRpc({
     executable: process.execPath,
     args: [fixture],

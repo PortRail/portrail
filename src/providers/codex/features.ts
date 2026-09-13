@@ -60,11 +60,15 @@ export interface FeatureReport {
  * this but returns an empty result and changes nothing for the current process;
  * `--disable` at spawn is what actually works.
  */
-export function reconcileFeatures(advertised: readonly AdvertisedFeature[]): FeatureReport {
+export function reconcileFeatures(
+  advertised: readonly AdvertisedFeature[],
+): FeatureReport {
   const byName = new Map(advertised.map((feature) => [feature.name, feature]));
   const disable = REFUSED_FEATURES.filter((name) => {
     const feature = byName.get(name);
-    return feature !== undefined && feature.enabled !== false && feature.stage !== "removed";
+    return (
+      feature !== undefined && feature.enabled !== false && feature.stage !== "removed"
+    );
   });
   const missing = REQUIRED_FEATURES.filter((name) => {
     const feature = byName.get(name);

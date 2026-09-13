@@ -15,10 +15,18 @@ const results: Array<{ agent: string; pass: boolean; seconds: number }> = [];
 for (const agent of agents) {
   const started = Date.now();
   console.log(`\n━━━ ${agent} ━━━`);
-  const result = spawnSync(process.execPath, ["--import", "tsx", script, agent], { stdio: "inherit", timeout: 300_000 });
-  results.push({ agent, pass: result.status === 0, seconds: Math.round((Date.now() - started) / 1000) });
+  const result = spawnSync(process.execPath, ["--import", "tsx", script, agent], {
+    stdio: "inherit",
+    timeout: 300_000,
+  });
+  results.push({
+    agent,
+    pass: result.status === 0,
+    seconds: Math.round((Date.now() - started) / 1000),
+  });
 }
 
 console.log("\n━━━ summary ━━━");
-for (const { agent, pass, seconds } of results) console.log(`  ${pass ? "PASS" : "FAIL"}  ${agent.padEnd(8)} ${seconds}s`);
+for (const { agent, pass, seconds } of results)
+  console.log(`  ${pass ? "PASS" : "FAIL"}  ${agent.padEnd(8)} ${seconds}s`);
 process.exit(results.every((r) => r.pass) ? 0 : 1);

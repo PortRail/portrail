@@ -74,7 +74,8 @@ function rulesFile(): string {
     `${MANAGED_MARKER} Portrail asks the operator's rules about every command, including the`,
     "# read-only ones Codex would otherwise run silently.",
     ...AUTO_TRUSTED_COMMANDS.map(
-      (command) => `prefix_rule(pattern=[${JSON.stringify(command)}], decision="prompt")`,
+      (command) =>
+        `prefix_rule(pattern=[${JSON.stringify(command)}], decision="prompt")`,
     ),
     "",
   ].join("\n");
@@ -165,7 +166,9 @@ export function codexEnvironment(home: CodexHome): NodeJS.ProcessEnv {
     TMPDIR: process.env.TMPDIR,
     LANG: process.env.LANG,
     CODEX_HOME: home.path,
-    ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
+    ...(process.env.OPENAI_API_KEY
+      ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY }
+      : {}),
     ...(process.env.CODEX_API_KEY ? { CODEX_API_KEY: process.env.CODEX_API_KEY } : {}),
   };
 }

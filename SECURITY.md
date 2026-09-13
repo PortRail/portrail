@@ -12,12 +12,12 @@ Portrail, Node and the agent (`portrail doctor --json` covers most of it).
 
 ## What you can expect
 
-| | |
-|---|---|
-| First reply | within 3 working days |
-| Assessment and a plan | within 10 working days |
-| Fix for a critical issue | target 14 days from the assessment |
-| Public advisory | when the fix ships, or 90 days after the report, whichever is first |
+|                          |                                                                     |
+| ------------------------ | ------------------------------------------------------------------- |
+| First reply              | within 3 working days                                               |
+| Assessment and a plan    | within 10 working days                                              |
+| Fix for a critical issue | target 14 days from the assessment                                  |
+| Public advisory          | when the fix ships, or 90 days after the report, whichever is first |
 
 Portrail has a single maintainer. If a deadline slips you will be told before it
 slips, not after.
@@ -28,6 +28,7 @@ version ships, the previous one receives security fixes for six months.
 ## Scope
 
 **In scope**
+
 - Any way to make an operation run without passing `Gateway.decide()`.
 - Any way to make `decide()` return `allow` for an operation the configured
   rules should refuse.
@@ -37,11 +38,12 @@ version ships, the previous one receives security fixes for six months.
 - Anything that makes a recorded verdict or audit entry wrong.
 
 **Out of scope — by design, documented in `docs/security.md`**
-- What an *allowed* command does after it starts. Portrail is not a sandbox.
+
+- What an _allowed_ command does after it starts. Portrail is not a sandbox.
 - An operator with a valid API key doing what their scopes permit.
 - Data at rest being unencrypted (`~/.portrail`, mode 0700).
 - The shipped default rule set being more permissive than your situation
-  needs. Report *bypasses* of the rules; tuning is a docs issue.
+  needs. Report _bypasses_ of the rules; tuning is a docs issue.
 - Anything requiring an attacker who already has local shell as your user.
 
 ## Safe harbour

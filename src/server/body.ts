@@ -11,7 +11,12 @@ const absent = (value: unknown) => value === undefined || value === null;
 export function optStr(input: Input, field: string): string | undefined {
   const value = input[field];
   if (absent(value)) return undefined;
-  ensure(typeof value === "string", 400, "INVALID_REQUEST", `${field} must be a string.`);
+  ensure(
+    typeof value === "string",
+    400,
+    "INVALID_REQUEST",
+    `${field} must be a string.`,
+  );
   return value;
 }
 
@@ -24,14 +29,28 @@ export function str(input: Input, field: string): string {
 export function optNum(input: Input, field: string): number | undefined {
   const value = input[field];
   if (absent(value)) return undefined;
-  ensure(typeof value === "number" && Number.isFinite(value), 400, "INVALID_REQUEST", `${field} must be a number.`);
+  ensure(
+    typeof value === "number" && Number.isFinite(value),
+    400,
+    "INVALID_REQUEST",
+    `${field} must be a number.`,
+  );
   return value;
 }
 
-export function obj(input: Input, field: string, options: { maxBytes: number }): Record<string, unknown> | undefined {
+export function obj(
+  input: Input,
+  field: string,
+  options: { maxBytes: number },
+): Record<string, unknown> | undefined {
   const value = input[field];
   if (absent(value)) return undefined;
-  ensure(typeof value === "object" && !Array.isArray(value), 400, "INVALID_REQUEST", `${field} must be an object.`);
+  ensure(
+    typeof value === "object" && !Array.isArray(value),
+    400,
+    "INVALID_REQUEST",
+    `${field} must be an object.`,
+  );
   ensure(
     Buffer.byteLength(JSON.stringify(value)) <= options.maxBytes,
     413,

@@ -18,7 +18,8 @@ import type { Operation } from "../src/types.ts";
 const ws = mkdtempSync(join(tmpdir(), "portrail-corpus-"));
 const outside = mkdtempSync(join(tmpdir(), "portrail-outside-"));
 const HOME = homedir();
-for (const dir of ["src/bin", "test", "confidential", "sub/deep", "node_modules/pkg"]) mkdirSync(join(ws, dir), { recursive: true });
+for (const dir of ["src/bin", "test", "confidential", "sub/deep", "node_modules/pkg"])
+  mkdirSync(join(ws, dir), { recursive: true });
 for (const [file, content] of [
   [".env", "API_KEY=synthetic"],
   [".envrc", "export TOKEN=synthetic"],
@@ -32,20 +33,33 @@ for (const [file, content] of [
   ["sub/deep/x.txt", ""],
   ["node_modules/pkg/index.js", ""],
   ["node_modules/pkg/server.pem", ""],
-] as const) writeFileSync(join(ws, file), content);
+] as const)
+  writeFileSync(join(ws, file), content);
 writeFileSync(join(outside, "victim.txt"), "synthetic");
 symlinkSync(join(ws, ".env"), join(ws, "innocent.txt"));
 symlinkSync(join(outside, "victim.txt"), join(ws, "escape.txt"));
 symlinkSync(join(HOME, ".ssh"), join(ws, "sub", "link-to-ssh"));
 
-const base = { id: "op", sessionId: "s", runId: "r", workspaceId: "w", agent: "codex" as const, requestedAt: "" };
+const base = {
+  id: "op",
+  sessionId: "s",
+  runId: "r",
+  workspaceId: "w",
+  agent: "codex" as const,
+  requestedAt: "",
+};
 type Lists = typeof DEFAULT_CONFIG.decide;
-const CUSTOM: Lists = { allow: ["read:**", "write:**", "exec:*"], deny: ["read:confidential/**", "exec:curl *"], ask: [] };
+const CUSTOM: Lists = {
+  allow: ["read:**", "write:**", "exec:*"],
+  deny: ["read:confidential/**", "exec:curl *"],
+  ask: [],
+};
 
 async function judge(command: string, lists: Lists = DEFAULT_CONFIG.decide, cwd = ws) {
   const operation: Operation = { ...base, kind: "exec", command, cwd };
   const contained = containOperation(operation, ws);
-  if (contained.refused) return { verdict: "deny" as const, reason: contained.refused, by: "containment" };
+  if (contained.refused)
+    return { verdict: "deny" as const, reason: contained.refused, by: "containment" };
   const decision = await new BuiltinDecider(lists).decide(contained.operation, {
     keyId: null,
     keyPolicy: null,
@@ -55,9 +69,24 @@ async function judge(command: string, lists: Lists = DEFAULT_CONFIG.decide, cwd 
   return { ...decision, by: "decider" };
 }
 
-type Row = { command: string; expected: "allow" | "deny"; reason?: RegExp; lists?: Lists; cwd?: string };
-const allow = (command: string, extra: Partial<Row> = {}): Row => ({ command, expected: "allow", ...extra });
-const deny = (command: string, reason?: RegExp, extra: Partial<Row> = {}): Row => ({ command, expected: "deny", ...(reason ? { reason } : {}), ...extra });
+type Row = {
+  command: string;
+  expected: "allow" | "deny";
+  reason?: RegExp;
+  lists?: Lists;
+  cwd?: string;
+};
+const allow = (command: string, extra: Partial<Row> = {}): Row => ({
+  command,
+  expected: "allow",
+  ...extra,
+});
+const deny = (command: string, reason?: RegExp, extra: Partial<Row> = {}): Row => ({
+  command,
+  expected: "deny",
+  ...(reason ? { reason } : {}),
+  ...extra,
+});
 const sub = join(ws, "sub");
 
 const rows: Row[] = [

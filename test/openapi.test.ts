@@ -9,7 +9,9 @@ import { Keys } from "../src/core/keys.ts";
 import { testGateway } from "./helpers.ts";
 
 test("every registered route is documented in openapi.json, and vice versa", async () => {
-  const spec = JSON.parse(readFileSync(new URL("../openapi.json", import.meta.url), "utf8"));
+  const spec = JSON.parse(
+    readFileSync(new URL("../openapi.json", import.meta.url), "utf8"),
+  );
   const documented = new Set<string>();
   for (const [path, methods] of Object.entries<any>(spec.paths))
     for (const method of Object.keys(methods))
@@ -35,7 +37,8 @@ test("every registered route is documented in openapi.json, and vice versa", asy
     while (stack.length && stack.at(-1)!.depth >= depth) stack.pop();
     const path = (stack.at(-1)?.path ?? "") + match[2];
     stack.push({ depth, path });
-    for (const method of match[3]!.split(/,\s*/)) if (method !== "HEAD") registered.add(`${method} ${path}`);
+    for (const method of match[3]!.split(/,\s*/))
+      if (method !== "HEAD") registered.add(`${method} ${path}`);
   }
   await app.close();
   await gateway.shutdown();

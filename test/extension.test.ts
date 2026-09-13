@@ -32,7 +32,11 @@ function fakePro(): Extension & { seen: string[] } {
         items: host.store.list("operation").filter((op: any) => op.state === "pending"),
       }));
       app.post("/v1/pending/:id/allow", async (request) => {
-        host.resolve((request.params as any).id, { verdict: "allow", reason: "approved via fake-pro" }, "fake-pro-user");
+        host.resolve(
+          (request.params as any).id,
+          { verdict: "allow", reason: "approved via fake-pro" },
+          "fake-pro-user",
+        );
         return { ok: true };
       });
     },
@@ -66,14 +70,21 @@ test("an extension swaps the decider, mounts routes, and resolves parked operati
     extension: pro,
     agentStatus: async () => [],
   });
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const headers = {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+  };
 
   // Start a run whose only exec will park.
   const created = await app.inject({
     method: "POST",
     url: "/v1/runs",
     headers,
-    payload: { agent: "fake", workspace: "work", prompt: script([{ write: "a.txt" }, { exec: "npm test" }, { text: "done" }]) },
+    payload: {
+      agent: "fake",
+      workspace: "work",
+      prompt: script([{ write: "a.txt" }, { exec: "npm test" }, { text: "done" }]),
+    },
   });
   assert.equal(created.statusCode, 202);
   const run = created.json();
@@ -84,26 +95,43 @@ test("an extension swaps the decider, mounts routes, and resolves parked operati
   assert.equal(gateway.run(run.id).state, "waiting_for_approval");
 
   // The extension's own route sees it.
-  const pending = (await app.inject({ method: "GET", url: "/v1/pending", headers })).json();
+  const pending = (
+    await app.inject({ method: "GET", url: "/v1/pending", headers })
+  ).json();
   assert.equal(pending.items.length, 1);
   assert.equal(pending.items[0].operation.kind, "exec");
 
   // And resolves it through the host.
-  const approved = await app.inject({ method: "POST", url: `/v1/pending/${pending.items[0].id}/allow`, headers, payload: {} });
+  const approved = await app.inject({
+    method: "POST",
+    url: `/v1/pending/${pending.items[0].id}/allow`,
+    headers,
+    payload: {},
+  });
   assert.equal(approved.statusCode, 200);
   await untilDone(gateway, run.id);
 
   const final = gateway.run(run.id);
   assert.equal(final.state, "succeeded");
   assert.match(final.summary ?? "", /\[exec ok\] done/);
-  const decided = gateway.listOperations({ runId: run.id }).find((op) => op.operation.kind === "exec");
+  const decided = gateway
+    .listOperations({ runId: run.id })
+    .find((op) => op.operation.kind === "exec");
   assert.equal(decided?.decidedBy, "fake-pro-user");
-  assert.ok(pro.seen.includes("approval.requested"), "the extension observed the approval event");
+  assert.ok(
+    pro.seen.includes("approval.requested"),
+    "the extension observed the approval event",
+  );
   assert.ok(pro.seen.includes("run.completed"));
 
   // Health reports the extension.
   const health = (await app.inject({ method: "GET", url: "/health" })).json();
-  assert.deepEqual(health.pro, { name: "fake-pro", version: "0.0.0-test", active: true, detail: "" });
+  assert.deepEqual(health.pro, {
+    name: "fake-pro",
+    version: "0.0.0-test",
+    active: true,
+    detail: "",
+  });
 
   await app.close();
   await gateway.shutdown();
@@ -121,7 +149,10 @@ test("without an extension, /health says so and no pro routes exist", async () =
     agentStatus: async () => [],
   });
   assert.equal((await app.inject({ method: "GET", url: "/health" })).json().pro, null);
-  assert.equal((await app.inject({ method: "GET", url: "/v1/pending" })).statusCode, 404);
+  assert.equal(
+    (await app.inject({ method: "GET", url: "/v1/pending" })).statusCode,
+    404,
+  );
   await app.close();
   await gateway.shutdown();
 });
@@ -132,6 +163,16 @@ test("--relay without Pro is refused with a reason, not silently ignored", async
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const home = mkdtempSync(join(tmpdir(), "portrail-norelay-"));
-  await assert.rejects(assemble({ home, noExtension: true, extensionOptions: { relay: "https://relay.example.test" } }), /relay mode is part of Portrail Pro, and Pro is not installed/);
-  await assert.rejects(assemble({ home, noExtension: true, extensionOptions: { frobnicate: true } }), /Unknown option --frobnicate/);
+  await assert.rejects(
+    assemble({
+      home,
+      noExtension: true,
+      extensionOptions: { relay: "https://relay.example.test" },
+    }),
+    /relay mode is part of Portrail Pro, and Pro is not installed/,
+  );
+  await assert.rejects(
+    assemble({ home, noExtension: true, extensionOptions: { frobnicate: true } }),
+    /Unknown option --frobnicate/,
+  );
 });

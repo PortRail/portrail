@@ -1,7 +1,11 @@
 import { join } from "node:path";
 import { id as newId, now } from "../../store/index.ts";
 import { PortrailError } from "../../contracts/errors.ts";
-import { claudeSdkAvailable, detectClaudeCredentials, findExecutable } from "../detect.ts";
+import {
+  claudeSdkAvailable,
+  detectClaudeCredentials,
+  findExecutable,
+} from "../detect.ts";
 import type {
   ProbeOptions,
   Provider,
@@ -72,7 +76,11 @@ export class ClaudeProvider implements Provider {
     if (!options.deep) {
       const credentials = await detectClaudeCredentials();
       const authMode: ProviderStatus["authMode"] =
-        credentials.source === "api_key" ? "api_key" : credentials.present ? "subscription" : "none";
+        credentials.source === "api_key"
+          ? "api_key"
+          : credentials.present
+            ? "subscription"
+            : "none";
       return {
         id: "claude",
         installed: true,
@@ -169,7 +177,20 @@ export class ClaudeProvider implements Provider {
       skills: [],
       tools: GOVERNED_TOOLS,
       allowedTools: [] as string[],
-      disallowedTools: ["Agent", "Task", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Skill", "EnterWorktree", "ExitWorktree", "Monitor", "Workflow", "AskUserQuestion"],
+      disallowedTools: [
+        "Agent",
+        "Task",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskGet",
+        "Skill",
+        "EnterWorktree",
+        "ExitWorktree",
+        "Monitor",
+        "Workflow",
+        "AskUserQuestion",
+      ],
       permissionMode: "default" as const,
       includePartialMessages: true,
       ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
@@ -178,7 +199,14 @@ export class ClaudeProvider implements Provider {
 
   async start(context: RunContext): Promise<ProviderHandle> {
     const sdk = this.options.sdk ?? (await loadSdk());
-    const run = new ClaudeRun(sdk, this.baseOptions(), context, this.options.maxBudgetUsd ?? null, this.options.sandbox ?? "required", this.options.denyRead ?? []);
+    const run = new ClaudeRun(
+      sdk,
+      this.baseOptions(),
+      context,
+      this.options.maxBudgetUsd ?? null,
+      this.options.sandbox ?? "required",
+      this.options.denyRead ?? [],
+    );
     try {
       await run.begin();
     } catch (error) {
@@ -198,7 +226,11 @@ class ClaudeRun implements ProviderHandle {
 
   /** How a run ends when the stream ends without a verdict: unknown once the agent had the work. */
   private lost(): RunOutcome["state"] {
-    return this.context.signal.aborted ? "cancelled" : this.started ? "outcome_unknown" : "failed";
+    return this.context.signal.aborted
+      ? "cancelled"
+      : this.started
+        ? "outcome_unknown"
+        : "failed";
   }
   private resolveDone!: (outcome: RunOutcome) => void;
   readonly done: Promise<RunOutcome>;
@@ -226,7 +258,10 @@ class ClaudeRun implements ProviderHandle {
     const abort = new AbortController();
     context.signal.addEventListener("abort", () => abort.abort(), { once: true });
 
-    const gate = async (toolName: string, input: Record<string, unknown>): Promise<Decision> => {
+    const gate = async (
+      toolName: string,
+      input: Record<string, unknown>,
+    ): Promise<Decision> => {
       const operation = toolToOperation(
         toolName,
         input,
@@ -260,8 +295,14 @@ class ClaudeRun implements ProviderHandle {
         ...(context.model ? { model: context.model } : {}),
         // The CLI reports a degraded sandbox on stderr only. Make it a visible event.
         stderr: (line: string) => {
-          if (/sandbox/i.test(line) && /disabled|unavailable|without sandboxing/i.test(line))
-            context.emit({ type: "warning", message: `Claude Code: ${line.trim().slice(0, 300)}` });
+          if (
+            /sandbox/i.test(line) &&
+            /disabled|unavailable|without sandboxing/i.test(line)
+          )
+            context.emit({
+              type: "warning",
+              message: `Claude Code: ${line.trim().slice(0, 300)}`,
+            });
         },
         maxTurns: 200,
         ...(this.budget !== null ? { maxBudgetUsd: this.budget } : {}),
@@ -277,12 +318,21 @@ class ClaudeRun implements ProviderHandle {
           failIfUnavailable: this.sandboxMode === "required",
           autoAllowBashIfSandboxed: false,
           allowUnsandboxedCommands: false,
-          network: { allowedDomains: [], strictAllowlist: true, allowLocalBinding: false },
+          network: {
+            allowedDomains: [],
+            strictAllowlist: true,
+            allowLocalBinding: false,
+          },
           filesystem: {
             allowWrite: [context.workspace.root],
             denyWrite: SANDBOX_DENY_READ,
             // A workspace-relative rule is anchored at this workspace; `**/x` already matches anywhere.
-            denyRead: [...SANDBOX_DENY_READ, ...this.denyRead.map((glob) => (glob.startsWith("**/") ? glob : join(context.workspace.root, glob)))],
+            denyRead: [
+              ...SANDBOX_DENY_READ,
+              ...this.denyRead.map((glob) =>
+                glob.startsWith("**/") ? glob : join(context.workspace.root, glob),
+              ),
+            ],
           },
         },
         systemPrompt: {
@@ -309,7 +359,8 @@ class ClaudeRun implements ProviderHandle {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
-                      permissionDecision: decision.verdict === "allow" ? "allow" : "deny",
+                      permissionDecision:
+                        decision.verdict === "allow" ? "allow" : "deny",
                       permissionDecisionReason: decision.reason,
                     },
                   };
@@ -342,13 +393,19 @@ class ClaudeRun implements ProviderHandle {
             break;
           case "stream_event": {
             const event: any = message.event;
-            if (event?.type === "content_block_delta" && event.delta?.type === "text_delta")
+            if (
+              event?.type === "content_block_delta" &&
+              event.delta?.type === "text_delta"
+            )
               context.emit({ type: "text", text: String(event.delta.text ?? "") });
             else if (
               event?.type === "content_block_delta" &&
               event.delta?.type === "thinking_delta"
             )
-              context.emit({ type: "reasoning", text: String(event.delta.thinking ?? "") });
+              context.emit({
+                type: "reasoning",
+                text: String(event.delta.thinking ?? ""),
+              });
             break;
           }
           case "assistant": {
@@ -377,7 +434,8 @@ class ClaudeRun implements ProviderHandle {
         }
       }
     } catch (error) {
-      if (!this.finished) this.finish(this.lost(), (error as Error).message ?? "Claude Code failed.");
+      if (!this.finished)
+        this.finish(this.lost(), (error as Error).message ?? "Claude Code failed.");
       return;
     }
 
@@ -392,7 +450,9 @@ class ClaudeRun implements ProviderHandle {
         type: "usage",
         inputTokens: Number(result.usage.input_tokens ?? 0),
         outputTokens: Number(result.usage.output_tokens ?? 0),
-        ...(typeof result.total_cost_usd === "number" ? { costUsd: result.total_cost_usd } : {}),
+        ...(typeof result.total_cost_usd === "number"
+          ? { costUsd: result.total_cost_usd }
+          : {}),
       });
 
     const succeeded = result.subtype === "success" && !result.is_error;
@@ -400,7 +460,9 @@ class ClaudeRun implements ProviderHandle {
       succeeded ? "succeeded" : context.signal.aborted ? "cancelled" : "failed",
       succeeded
         ? String(result.result ?? "Completed.")
-        : String(result.errors?.join("\n") ?? result.result ?? result.subtype ?? "Failed."),
+        : String(
+            result.errors?.join("\n") ?? result.result ?? result.subtype ?? "Failed.",
+          ),
     );
   }
 
@@ -414,7 +476,9 @@ class ClaudeRun implements ProviderHandle {
     const tools: string[] = Array.isArray(message.tools) ? message.tools : [];
     // We asked for no MCP servers, so an mcp__ tool is as unexpected as any other.
     const unexpected = tools.filter((tool) => !GOVERNED_TOOLS.includes(tool));
-    const servers: Array<{ name: string; status: string }> = Array.isArray(message.mcp_servers)
+    const servers: Array<{ name: string; status: string }> = Array.isArray(
+      message.mcp_servers,
+    )
       ? message.mcp_servers
       : [];
     if (unexpected.length || servers.length) {
@@ -449,13 +513,21 @@ class ClaudeRun implements ProviderHandle {
       const stdout = String((structured as any).stdout ?? "");
       const stderr = String((structured as any).stderr ?? "");
       if (stdout || stderr)
-        context.emit({ type: "command.output", opId: toolUseId, text: stdout + stderr });
+        context.emit({
+          type: "command.output",
+          opId: toolUseId,
+          text: stdout + stderr,
+        });
       context.emit({
         type: "command.finished",
         opId: toolUseId,
         exitCode: block.is_error ? 1 : 0,
       });
-    } else if (structured && typeof structured === "object" && "filePath" in structured) {
+    } else if (
+      structured &&
+      typeof structured === "object" &&
+      "filePath" in structured
+    ) {
       context.emit({
         type: "files.changed",
         changes: [{ path: String((structured as any).filePath), change: "update" }],
@@ -504,5 +576,3 @@ class ClaudeRun implements ProviderHandle {
     }
   }
 }
-
-

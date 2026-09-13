@@ -9,7 +9,10 @@ export interface PortrailConfig {
   tls: { cert: string | null; key: string | null };
   defaultAgent: "codex" | "claude";
   /** Explicit binary paths, for agents installed outside the current PATH. */
-  agents: { codex: { path: string | null }; claude: { path: string | null; sandbox: "required" | "best-effort" } };
+  agents: {
+    codex: { path: string | null };
+    claude: { path: string | null; sandbox: "required" | "best-effort" };
+  };
   run: { maxSeconds: number; maxConcurrent: number; maxBudgetUsd: number | null };
   /** How long a parked operation may wait for an answer before it is refused. */
   approvals: { timeoutMinutes: number };
@@ -34,7 +37,10 @@ export const RUN_MAX_SECONDS = { min: 30, max: 4 * 3600 } as const;
 /** A command with and without arguments: `npm test` and `npm test -- x`, never `npm testx`. */
 const plain = (command: string) => [`exec:${command}`, `exec:${command} *`];
 /** A package script by name, with arguments, and its `name:variant` forms (`test:unit`). */
-const script = (runner: string, name: string) => [...plain(`${runner} ${name}`), `exec:${runner} ${name}:*`];
+const script = (runner: string, name: string) => [
+  ...plain(`${runner} ${name}`),
+  `exec:${runner} ${name}:*`,
+];
 
 export const DEFAULT_CONFIG: PortrailConfig = {
   version: 1,
@@ -259,18 +265,32 @@ export function validateConfig(input: unknown): PortrailConfig {
   };
 
   const { host, port } = merged.listen;
-  if (typeof host !== "string" || !host) invalid("listen.host must be a hostname or IP.");
+  if (typeof host !== "string" || !host)
+    invalid("listen.host must be a hostname or IP.");
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     invalid("listen.port must be a port from 1 to 65535.");
   if (!["codex", "claude"].includes(merged.defaultAgent))
     invalid('defaultAgent must be "codex" or "claude".');
-  if (!Number.isInteger(merged.run.maxSeconds) || merged.run.maxSeconds < RUN_MAX_SECONDS.min || merged.run.maxSeconds > RUN_MAX_SECONDS.max)
-    invalid(`run.maxSeconds must be an integer from ${RUN_MAX_SECONDS.min} to ${RUN_MAX_SECONDS.max}.`);
+  if (
+    !Number.isInteger(merged.run.maxSeconds) ||
+    merged.run.maxSeconds < RUN_MAX_SECONDS.min ||
+    merged.run.maxSeconds > RUN_MAX_SECONDS.max
+  )
+    invalid(
+      `run.maxSeconds must be an integer from ${RUN_MAX_SECONDS.min} to ${RUN_MAX_SECONDS.max}.`,
+    );
   if (!Number.isInteger(merged.run.maxConcurrent) || merged.run.maxConcurrent < 1)
     invalid("run.maxConcurrent must be at least 1.");
-  if (merged.run.maxBudgetUsd !== null && !(typeof merged.run.maxBudgetUsd === "number" && merged.run.maxBudgetUsd > 0))
+  if (
+    merged.run.maxBudgetUsd !== null &&
+    !(typeof merged.run.maxBudgetUsd === "number" && merged.run.maxBudgetUsd > 0)
+  )
     invalid("run.maxBudgetUsd must be a positive number or null.");
-  if (!Number.isInteger(merged.approvals.timeoutMinutes) || merged.approvals.timeoutMinutes < 1 || merged.approvals.timeoutMinutes > 1440)
+  if (
+    !Number.isInteger(merged.approvals.timeoutMinutes) ||
+    merged.approvals.timeoutMinutes < 1 ||
+    merged.approvals.timeoutMinutes > 1440
+  )
     invalid("approvals.timeoutMinutes must be 1–1440.");
   for (const field of ["allow", "deny", "ask"] as const)
     if (
@@ -283,7 +303,10 @@ export function validateConfig(input: unknown): PortrailConfig {
     if (path !== null && (typeof path !== "string" || !path.startsWith("/")))
       invalid(`agents.${agent}.path must be an absolute path or null.`);
   }
-  if (merged.agents.claude.sandbox !== "required" && merged.agents.claude.sandbox !== "best-effort")
+  if (
+    merged.agents.claude.sandbox !== "required" &&
+    merged.agents.claude.sandbox !== "best-effort"
+  )
     invalid('agents.claude.sandbox must be "required" or "best-effort".');
   if ((merged.tls.cert === null) !== (merged.tls.key === null))
     invalid("tls.cert and tls.key must both be set, or both be null.");

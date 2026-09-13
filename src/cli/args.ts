@@ -12,9 +12,21 @@ export interface ParsedArgs {
  * Flags that never take a value. Without this list `--json "hello"` would read the
  * prompt as the flag's value; with it, what follows a boolean flag is a positional.
  */
-export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["json", "live", "insecure", "with-fake-agent", "follow", "f", "version", "help"]);
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  "json",
+  "live",
+  "insecure",
+  "with-fake-agent",
+  "follow",
+  "f",
+  "version",
+  "help",
+]);
 
-export function parseArgs(argv: readonly string[], options: { booleans?: ReadonlySet<string> } = {}): ParsedArgs {
+export function parseArgs(
+  argv: readonly string[],
+  options: { booleans?: ReadonlySet<string> } = {},
+): ParsedArgs {
   const positional: string[] = [];
   const flags = new Map<string, string | true>();
   let passthrough = false;

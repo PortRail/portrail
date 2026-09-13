@@ -106,7 +106,9 @@ export class CodexProvider implements Provider {
     }
     try {
       const listed = await own.call("experimentalFeature/list", {}, 30_000);
-      const features = reconcileFeatures(Array.isArray(listed?.data) ? listed.data : []);
+      const features = reconcileFeatures(
+        Array.isArray(listed?.data) ? listed.data : [],
+      );
       const models = await own.call("model/list", {}, 30_000).catch(() => null);
       const modelList = Array.isArray(models?.data)
         ? (models.data as any[])
@@ -267,7 +269,9 @@ class CodexRun implements ProviderHandle {
     rpc.on("notification", (message: RpcMessage) => this.onNotification(message));
     rpc.on("request", (message: RpcMessage) => void this.onRequest(message));
 
-    context.signal.addEventListener("abort", () => void this.interrupt(), { once: true });
+    context.signal.addEventListener("abort", () => void this.interrupt(), {
+      once: true,
+    });
 
     await initialize(rpc);
 
@@ -278,13 +282,17 @@ class CodexRun implements ProviderHandle {
       });
 
     const model = context.model ?? this.runtime.defaultModel;
-    if (context.model && !this.runtime.models.some((entry) => entry.id === context.model))
+    if (
+      context.model &&
+      !this.runtime.models.some((entry) => entry.id === context.model)
+    )
       throw new Error(
         `Model "${context.model}" is not offered by this Codex. Available: ${this.runtime.models.map((entry) => entry.id).join(", ")}.`,
       );
 
     const account = await rpc.call("account/read", { refreshToken: false }, 30_000);
-    if (!account?.account) throw new Error("Codex is not signed in. Run `codex login`.");
+    if (!account?.account)
+      throw new Error("Codex is not signed in. Run `codex login`.");
 
     const config: Record<string, unknown> = {
       sandbox_workspace_write: {
@@ -320,7 +328,11 @@ class CodexRun implements ProviderHandle {
     };
 
     const thread = context.nativeSessionId
-      ? await rpc.call("thread/resume", { threadId: context.nativeSessionId, ...binding }, 60_000)
+      ? await rpc.call(
+          "thread/resume",
+          { threadId: context.nativeSessionId, ...binding },
+          60_000,
+        )
       : await rpc.call("thread/start", binding, 60_000);
     this.threadId = thread?.thread?.id ?? null;
     if (!this.threadId) throw new Error("Codex did not return a thread id.");
@@ -334,7 +346,9 @@ class CodexRun implements ProviderHandle {
         30_000,
       )
       .catch((error: Error) => {
-        throw new Error(`Codex could not list its MCP servers (${error.message}). Refusing to run with an unverified tool surface.`);
+        throw new Error(
+          `Codex could not list its MCP servers (${error.message}). Refusing to run with an unverified tool surface.`,
+        );
       });
     const foreign = (inventory?.data ?? []).filter(
       (entry: any) => Object.keys(entry?.tools ?? {}).length > 0,
@@ -369,7 +383,8 @@ class CodexRun implements ProviderHandle {
     const params = message.params ?? {};
     switch (message.method) {
       case "item/agentMessage/delta":
-        if (typeof params.delta === "string") context.emit({ type: "text", text: params.delta });
+        if (typeof params.delta === "string")
+          context.emit({ type: "text", text: params.delta });
         return;
       case "item/reasoning/textDelta":
       case "item/reasoning/summaryTextDelta":
@@ -378,7 +393,11 @@ class CodexRun implements ProviderHandle {
         return;
       case "item/commandExecution/outputDelta":
         if (typeof params.delta === "string")
-          context.emit({ type: "command.output", opId: String(params.itemId), text: params.delta });
+          context.emit({
+            type: "command.output",
+            opId: String(params.itemId),
+            text: params.delta,
+          });
         return;
       case "item/started":
         this.onItem(params.item, "started");
@@ -388,10 +407,14 @@ class CodexRun implements ProviderHandle {
         return;
       case "item/fileChange/patchUpdated":
         if (params.itemId && Array.isArray(params.changes))
-          this.changesByItem.set(String(params.itemId), params.changes.map(toFileChange));
+          this.changesByItem.set(
+            String(params.itemId),
+            params.changes.map(toFileChange),
+          );
         return;
       case "turn/diff/updated":
-        if (typeof params.diff === "string") context.emit({ type: "diff", unified: params.diff });
+        if (typeof params.diff === "string")
+          context.emit({ type: "diff", unified: params.diff });
         return;
       case "thread/tokenUsage/updated": {
         const total = params.tokenUsage?.total;
@@ -446,7 +469,9 @@ class CodexRun implements ProviderHandle {
           });
         return;
       case "fileChange": {
-        const changes = Array.isArray(item.changes) ? item.changes.map(toFileChange) : [];
+        const changes = Array.isArray(item.changes)
+          ? item.changes.map(toFileChange)
+          : [];
         this.changesByItem.set(String(item.id), changes);
         if (phase === "completed" && item.status === "completed" && changes.length)
           context.emit({ type: "files.changed", changes });
@@ -521,7 +546,10 @@ class CodexRun implements ProviderHandle {
           // granted.
           const translated = translatePermissions(params.permissions);
           if (translated.refused) {
-            context.emit({ type: "warning", message: `Codex asked for a permission Portrail cannot judge (${translated.refused}); refused.` });
+            context.emit({
+              type: "warning",
+              message: `Codex asked for a permission Portrail cannot judge (${translated.refused}); refused.`,
+            });
             answer({ permissions: {}, scope: "turn" });
             return;
           }
@@ -536,7 +564,10 @@ class CodexRun implements ProviderHandle {
           const granted: unknown[] = [];
           let scope: "turn" | "session" = "session";
           let networkAllowed = false;
-          const judge = async (operation: Operation, entries: unknown[]): Promise<boolean> => {
+          const judge = async (
+            operation: Operation,
+            entries: unknown[],
+          ): Promise<boolean> => {
             const decision = await this.decide(operation, controller.signal);
             if (decision === null || decision.verdict !== "allow") return false;
             if (decision.scope !== "session") scope = "turn";
@@ -544,18 +575,38 @@ class CodexRun implements ProviderHandle {
             return true;
           };
           if (translated.reads.length)
-            await judge({ ...base, id: newId("op"), kind: "read", paths: translated.reads.map((e) => e.path) }, translated.reads.map((e) => e.entry));
+            await judge(
+              {
+                ...base,
+                id: newId("op"),
+                kind: "read",
+                paths: translated.reads.map((e) => e.path),
+              },
+              translated.reads.map((e) => e.entry),
+            );
           if (translated.writes.length)
             await judge(
-              { ...base, id: newId("op"), kind: "write", changes: translated.writes.map((e) => ({ path: e.path, change: "update" as const })) },
+              {
+                ...base,
+                id: newId("op"),
+                kind: "write",
+                changes: translated.writes.map((e) => ({
+                  path: e.path,
+                  change: "update" as const,
+                })),
+              },
               translated.writes.map((e) => e.entry),
             );
-          if (translated.network) networkAllowed = await judge({ ...base, id: newId("op"), kind: "net" }, []);
+          if (translated.network)
+            networkAllowed = await judge({ ...base, id: newId("op"), kind: "net" }, []);
           if (controller.signal.aborted) return; // withdrawn while deciding
           const permissions: Record<string, unknown> = {};
           if (granted.length) permissions.fileSystem = { entries: granted };
           if (networkAllowed) permissions.network = { enabled: true };
-          answer({ permissions, scope: granted.length || networkAllowed ? scope : "turn" });
+          answer({
+            permissions,
+            scope: granted.length || networkAllowed ? scope : "turn",
+          });
           return;
         }
         case "mcpServer/elicitation/request": {
@@ -621,7 +672,11 @@ class CodexRun implements ProviderHandle {
           ? "Interrupted."
           : `Turn ${status ?? "ended"}.`);
     this.finish(
-      status === "completed" ? "succeeded" : status === "interrupted" ? "cancelled" : "failed",
+      status === "completed"
+        ? "succeeded"
+        : status === "interrupted"
+          ? "cancelled"
+          : "failed",
       summary,
     );
   }
@@ -694,14 +749,23 @@ export function translatePermissions(permissions: any): {
 } {
   const reads: Array<{ path: string; entry: unknown }> = [];
   const writes: Array<{ path: string; entry: unknown }> = [];
-  if (!permissions || typeof permissions !== "object") return { reads, writes, network: false, refused: "no permissions object" };
+  if (!permissions || typeof permissions !== "object")
+    return { reads, writes, network: false, refused: "no permissions object" };
   for (const key of Object.keys(permissions))
-    if (key !== "fileSystem" && key !== "network") return { reads, writes, network: false, refused: `unknown permission "${key}"` };
+    if (key !== "fileSystem" && key !== "network")
+      return { reads, writes, network: false, refused: `unknown permission "${key}"` };
   const fs = permissions.fileSystem;
   if (fs !== undefined) {
-    if (!fs || typeof fs !== "object") return { reads, writes, network: false, refused: "malformed fileSystem" };
+    if (!fs || typeof fs !== "object")
+      return { reads, writes, network: false, refused: "malformed fileSystem" };
     for (const key of Object.keys(fs))
-      if (key !== "entries" && key !== "write") return { reads, writes, network: false, refused: `unknown fileSystem field "${key}"` };
+      if (key !== "entries" && key !== "write")
+        return {
+          reads,
+          writes,
+          network: false,
+          refused: `unknown fileSystem field "${key}"`,
+        };
     for (const entry of Array.isArray(fs.entries) ? fs.entries : []) {
       const target = entry?.path;
       const path =
@@ -710,19 +774,38 @@ export function translatePermissions(permissions: any): {
           : target?.type === "glob_pattern" && typeof target.pattern === "string"
             ? target.pattern
             : null;
-      if (path === null) return { reads, writes, network: false, refused: `a ${String(target?.type ?? "missing")} path target` };
+      if (path === null)
+        return {
+          reads,
+          writes,
+          network: false,
+          refused: `a ${String(target?.type ?? "missing")} path target`,
+        };
       if (entry.access === "write") writes.push({ path, entry });
       else if (entry.access === "read") reads.push({ path, entry });
-      else if (entry.access === "deny") continue; // narrowing its own access needs no permission
-      else return { reads, writes, network: false, refused: `access mode "${String(entry?.access)}"` };
+      else if (entry.access === "deny")
+        continue; // narrowing its own access needs no permission
+      else
+        return {
+          reads,
+          writes,
+          network: false,
+          refused: `access mode "${String(entry?.access)}"`,
+        };
     }
     for (const legacy of Array.isArray(fs.write) ? fs.write : [])
-      if (typeof legacy === "string") writes.push({ path: legacy, entry: { access: "write", path: { type: "path", path: legacy } } });
+      if (typeof legacy === "string")
+        writes.push({
+          path: legacy,
+          entry: { access: "write", path: { type: "path", path: legacy } },
+        });
       else return { reads, writes, network: false, refused: "a non-string write root" };
   }
   const network = permissions.network;
-  if (network !== undefined && (!network || typeof network !== "object" || typeof network.enabled !== "boolean"))
+  if (
+    network !== undefined &&
+    (!network || typeof network !== "object" || typeof network.enabled !== "boolean")
+  )
     return { reads, writes, network: false, refused: "malformed network permission" };
   return { reads, writes, network: !!network?.enabled, refused: null };
 }
-

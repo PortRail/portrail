@@ -13,7 +13,12 @@ const base = {
 const root = "/work";
 
 test("Bash becomes an exec operation carrying the exact command", () => {
-  const op = toolToOperation("Bash", { command: "npm test", description: "run tests" }, base, root);
+  const op = toolToOperation(
+    "Bash",
+    { command: "npm test", description: "run tests" },
+    base,
+    root,
+  );
   assert.equal(op?.kind, "exec");
   if (op?.kind === "exec") {
     assert.equal(op.command, "npm test");
@@ -23,7 +28,12 @@ test("Bash becomes an exec operation carrying the exact command", () => {
 });
 
 test("Write and Edit become write operations; Edit carries a readable diff", () => {
-  const write = toolToOperation("Write", { file_path: "/work/a.ts", content: "x" }, base, root);
+  const write = toolToOperation(
+    "Write",
+    { file_path: "/work/a.ts", content: "x" },
+    base,
+    root,
+  );
   assert.equal(write?.kind, "write");
   if (write?.kind === "write") assert.equal(write.changes[0]?.path, "/work/a.ts");
 
@@ -41,9 +51,17 @@ test("Write and Edit become write operations; Edit carries a readable diff", () 
 });
 
 test("reads, web access and MCP tools map to their own kinds", () => {
-  assert.equal(toolToOperation("Read", { file_path: "/work/x" }, base, root)?.kind, "read");
+  assert.equal(
+    toolToOperation("Read", { file_path: "/work/x" }, base, root)?.kind,
+    "read",
+  );
   assert.equal(toolToOperation("Grep", { pattern: "x" }, base, root)?.kind, "read");
-  const fetch = toolToOperation("WebFetch", { url: "https://example.com/p" }, base, root);
+  const fetch = toolToOperation(
+    "WebFetch",
+    { url: "https://example.com/p" },
+    base,
+    root,
+  );
   assert.equal(fetch?.kind, "net");
   if (fetch?.kind === "net") assert.equal(fetch.host, "example.com");
   const mcp = toolToOperation("mcp__github__create_issue", { title: "t" }, base, root);
@@ -70,10 +88,19 @@ test("a Grep is a search over a directory, and a Glob pattern that points somewh
   const grep = toolToOperation("Grep", { pattern: "x" }, base, root);
   assert.equal(grep?.kind, "read");
   if (grep?.kind === "read") {
-    assert.equal(grep.recursive, true, "every file beneath the searched directory may be read");
+    assert.equal(
+      grep.recursive,
+      true,
+      "every file beneath the searched directory may be read",
+    );
     assert.deepEqual(grep.paths, [root]);
   }
-  const scoped = toolToOperation("Grep", { pattern: "x", path: "/work/src" }, base, root);
+  const scoped = toolToOperation(
+    "Grep",
+    { pattern: "x", path: "/work/src" },
+    base,
+    root,
+  );
   if (scoped?.kind === "read") assert.deepEqual(scoped.paths, ["/work/src"]);
 
   const anywhere = toolToOperation("Glob", { pattern: "**/*.ts" }, base, root);
@@ -82,7 +109,9 @@ test("a Grep is a search over a directory, and a Glob pattern that points somewh
     assert.ok(!anywhere.recursive, "Glob lists names, it does not read content");
   }
   const absolute = toolToOperation("Glob", { pattern: "/etc/*" }, base, root);
-  if (absolute?.kind === "read") assert.ok(absolute.paths.includes("/etc"), absolute.paths.join(","));
+  if (absolute?.kind === "read")
+    assert.ok(absolute.paths.includes("/etc"), absolute.paths.join(","));
   const climbing = toolToOperation("Glob", { pattern: "../x/**" }, base, root);
-  if (climbing?.kind === "read") assert.ok(climbing.paths.includes("/x"), climbing.paths.join(","));
+  if (climbing?.kind === "read")
+    assert.ok(climbing.paths.includes("/x"), climbing.paths.join(","));
 });

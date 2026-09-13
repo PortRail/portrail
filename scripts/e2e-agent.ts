@@ -23,8 +23,7 @@ const stamp = () => `+${((Date.now() - started) / 1000).toFixed(1)}s`;
 
 // Allow everything except one deliberately refused command, so we can see both paths.
 async function decide(operation: Operation): Promise<Decision> {
-  const refused =
-    operation.kind === "exec" && /\bwhoami\b/.test(operation.command);
+  const refused = operation.kind === "exec" && /\bwhoami\b/.test(operation.command);
   const decision: Decision = refused
     ? { verdict: "deny", reason: "e2e: whoami is refused on purpose" }
     : { verdict: "allow", reason: "e2e: allowed", scope: "once" };
@@ -35,7 +34,9 @@ async function decide(operation: Operation): Promise<Decision> {
       : operation.kind === "write"
         ? operation.changes.map((c) => `${c.change} ${c.path}`).join(", ")
         : operation.kind;
-  console.log(`${stamp()}  DECIDE  ${operation.kind.padEnd(5)} ${decision.verdict.padEnd(5)} ${label}`);
+  console.log(
+    `${stamp()}  DECIDE  ${operation.kind.padEnd(5)} ${decision.verdict.padEnd(5)} ${label}`,
+  );
   return decision;
 }
 
@@ -43,7 +44,10 @@ const agent = process.argv[2] ?? "codex";
 const provider =
   agent === "claude"
     ? new ClaudeProvider({ executablePath: config.agents.claude.path })
-    : new CodexProvider({ executablePath: config.agents.codex.path, dataDir: dataDirectory() });
+    : new CodexProvider({
+        executablePath: config.agents.codex.path,
+        dataDir: dataDirectory(),
+      });
 console.log(`agent: ${agent}`);
 const abort = new AbortController();
 const timer = setTimeout(() => abort.abort(), 240_000);
@@ -79,13 +83,17 @@ const handle = await provider.start({
         console.log(`${stamp()}  EXIT    ${event.exitCode}`);
         break;
       case "files.changed":
-        console.log(`${stamp()}  FILES   ${event.changes.map((c) => `${c.change} ${c.path}`).join(", ")}`);
+        console.log(
+          `${stamp()}  FILES   ${event.changes.map((c) => `${c.change} ${c.path}`).join(", ")}`,
+        );
         break;
       case "warning":
         console.log(`${stamp()}  WARN    ${event.message}`);
         break;
       case "usage":
-        console.log(`${stamp()}  USAGE   in=${event.inputTokens} out=${event.outputTokens}`);
+        console.log(
+          `${stamp()}  USAGE   in=${event.inputTokens} out=${event.outputTokens}`,
+        );
         break;
     }
   },
@@ -106,11 +114,20 @@ const denied = decisions.filter((entry) => entry.decision.verdict === "deny");
 console.log(`\noutcome succeeded:  ${outcome.state === "succeeded"}`);
 console.log(`file created:       ${exists}`);
 console.log(`file content ok:    ${content?.trim() === "hello from portrail"}`);
-console.log(`operations decided: ${decisions.length} (${decisions.filter((d) => d.operation.kind === "exec").length} exec, ${decisions.filter((d) => d.operation.kind === "write").length} write)`);
+console.log(
+  `operations decided: ${decisions.length} (${decisions.filter((d) => d.operation.kind === "exec").length} exec, ${decisions.filter((d) => d.operation.kind === "write").length} write)`,
+);
 console.log(`denial observed:    ${denied.length > 0}`);
-console.log(`event types seen:   ${[...new Set(events.map((event) => event.type))].join(", ")}`);
+console.log(
+  `event types seen:   ${[...new Set(events.map((event) => event.type))].join(", ")}`,
+);
 
 rmSync(root, { recursive: true, force: true });
-const pass = outcome.state === "succeeded" && exists && content?.trim() === "hello from portrail" && decisions.length > 0 && denied.length > 0;
+const pass =
+  outcome.state === "succeeded" &&
+  exists &&
+  content?.trim() === "hello from portrail" &&
+  decisions.length > 0 &&
+  denied.length > 0;
 console.log(`\n${pass ? "PASS" : "FAIL"}`);
 process.exit(pass ? 0 : 1);

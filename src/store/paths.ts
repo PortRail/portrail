@@ -4,9 +4,9 @@ import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 
 /** Where Portrail keeps its database, config and logs. */
 export function dataDirectory(override?: string): string {
-  const chosen = override ?? process.env.PORTRAIL_HOME ?? resolve(homedir(), ".portrail");
-  if (!isAbsolute(chosen))
-    throw new Error("PORTRAIL_HOME must be an absolute path.");
+  const chosen =
+    override ?? process.env.PORTRAIL_HOME ?? resolve(homedir(), ".portrail");
+  if (!isAbsolute(chosen)) throw new Error("PORTRAIL_HOME must be an absolute path.");
   return chosen;
 }
 
@@ -27,9 +27,7 @@ function statOrUndefined(path: string) {
 export function ensurePrivateDirectory(directory: string): string {
   const existing = statOrUndefined(directory);
   if (existing && (!existing.isDirectory() || existing.isSymbolicLink()))
-    throw new Error(
-      `Portrail data must be a real directory, not a link: ${directory}`,
-    );
+    throw new Error(`Portrail data must be a real directory, not a link: ${directory}`);
 
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const canonical = realpathSync(directory);

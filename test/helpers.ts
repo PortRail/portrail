@@ -13,7 +13,11 @@ import type { PortrailEvent } from "../src/store/index.ts";
 export const script = (steps: unknown[]) => JSON.stringify(steps);
 
 export function testGateway(
-  overrides: Partial<GatewayOptions> & { decider?: Decider; store?: Store; providers?: Map<AgentId, Provider> } = {},
+  overrides: Partial<GatewayOptions> & {
+    decider?: Decider;
+    store?: Store;
+    providers?: Map<AgentId, Provider>;
+  } = {},
 ) {
   const store = overrides.store ?? new Store(":memory:");
   const decider =
@@ -22,7 +26,8 @@ export function testGateway(
       allow: ["read:**", "write:**", "exec:npm test*", "exec:ls*"],
       deny: ["write:.env*", "exec:rm -rf*", "net:*"],
     });
-  const providers = overrides.providers ?? new Map<AgentId, Provider>([["fake", new FakeProvider()]]);
+  const providers =
+    overrides.providers ?? new Map<AgentId, Provider>([["fake", new FakeProvider()]]);
   const gateway = new Gateway(store, providers, decider, {
     maxConcurrent: overrides.maxConcurrent ?? 2,
     defaultMaxSeconds: overrides.defaultMaxSeconds ?? 60,
@@ -40,7 +45,10 @@ export function testGateway(
 export function untilDone(gateway: Gateway, runId: string, timeoutMs = 5000) {
   return new Promise<void>((resolve, reject) => {
     if (TERMINAL_STATES.has(gateway.run(runId).state)) return resolve();
-    const timer = setTimeout(() => reject(new Error(`run ${runId} did not finish`)), timeoutMs);
+    const timer = setTimeout(
+      () => reject(new Error(`run ${runId} did not finish`)),
+      timeoutMs,
+    );
     const check = (event: PortrailEvent) => {
       if (event.runId === runId && event.type === "run.completed") {
         clearTimeout(timer);

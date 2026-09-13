@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readlinkSync, lstatSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readlinkSync,
+  lstatSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexEnvironment, prepareCodexHome } from "../src/providers/codex/home.ts";
@@ -58,6 +65,8 @@ test("no login file means no link, and the environment still carries API keys", 
 
     const env = codexEnvironment(home);
     assert.equal(env.CODEX_HOME, home.path);
-    assert.ok(!("OPENAI_API_KEY" in env) || env.OPENAI_API_KEY === process.env.OPENAI_API_KEY);
+    assert.ok(
+      !("OPENAI_API_KEY" in env) || env.OPENAI_API_KEY === process.env.OPENAI_API_KEY,
+    );
   });
 });

@@ -57,6 +57,7 @@
     "doctor": "node --import tsx src/cli/main.ts doctor",
     "e2e": "node --import tsx scripts/e2e.ts",
     "format": "prettier --write \"{src,test,scripts}/**/*.ts\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"{src,test,scripts}/**/*.ts\" \"*.{json,md}\"",
     "test:install": "bash scripts/install-test.sh",
     "e2e:sandbox": "node --import tsx scripts/e2e-sandbox.ts",
     "prepack": "npm run build",

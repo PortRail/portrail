@@ -6,8 +6,11 @@ test("Codex's login-shell wrapper is peeled so rules see what a person would typ
   const cases: Array<[string, string]> = [
     ["/bin/zsh -lc 'cat greeting.txt'", "cat greeting.txt"],
     ["/bin/zsh -lc whoami", "whoami"],
-    ["/bin/bash -c \"npm test -- --watch\"", "npm test -- --watch"],
-    ["/bin/zsh -lc 'printf '\\''hi\\n'\\'' > x.txt && cat x.txt'", "printf 'hi\\n' > x.txt && cat x.txt"],
+    ['/bin/bash -c "npm test -- --watch"', "npm test -- --watch"],
+    [
+      "/bin/zsh -lc 'printf '\\''hi\\n'\\'' > x.txt && cat x.txt'",
+      "printf 'hi\\n' > x.txt && cat x.txt",
+    ],
   ];
   for (const [raw, expected] of cases) {
     const result = unwrapShellCommand(raw);
@@ -19,7 +22,11 @@ test("Codex's login-shell wrapper is peeled so rules see what a person would typ
 test("a bare command is passed through untouched", () => {
   assert.deepEqual(unwrapShellCommand("cat file"), { command: "cat file" });
   assert.deepEqual(unwrapShellCommand("/bin/zsh -lc"), { command: "/bin/zsh -lc" });
-  assert.deepEqual(unwrapShellCommand("zsh -lc a b"), { command: "zsh -lc a b" }, "four tokens is not the wrapper");
+  assert.deepEqual(
+    unwrapShellCommand("zsh -lc a b"),
+    { command: "zsh -lc a b" },
+    "four tokens is not the wrapper",
+  );
 });
 
 test("word splitting handles quotes and escapes without ever running anything", () => {
@@ -30,8 +37,14 @@ test("word splitting handles quotes and escapes without ever running anything", 
 
 test("a session-scoped allow is still sent to Codex as a one-off accept, never acceptForSession", async () => {
   const { toCodexDecision } = await import("../src/providers/codex/approvals.ts");
-  assert.equal(toCodexDecision({ verdict: "allow", reason: "", scope: "session" }), "accept");
-  assert.equal(toCodexDecision({ verdict: "allow", reason: "", scope: "run" }), "accept");
+  assert.equal(
+    toCodexDecision({ verdict: "allow", reason: "", scope: "session" }),
+    "accept",
+  );
+  assert.equal(
+    toCodexDecision({ verdict: "allow", reason: "", scope: "run" }),
+    "accept",
+  );
   assert.equal(toCodexDecision({ verdict: "allow", reason: "" }), "accept");
   assert.equal(toCodexDecision({ verdict: "deny", reason: "" }), "decline");
 });

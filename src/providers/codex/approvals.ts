@@ -34,17 +34,16 @@ export function toFileChange(raw: any): FileChange {
 /** Codex classifies commands best-effort; keep it, it makes rules smarter. */
 export function toCommandActions(raw: unknown): CommandAction[] | undefined {
   if (!Array.isArray(raw)) return undefined;
-  return raw
-    .map((entry: any): CommandAction => {
-      switch (entry?.type) {
-        case "read":
-          return { action: "read", path: entry.path };
-        case "listFiles":
-          return { action: "list", path: entry.path };
-        case "search":
-          return { action: "search", path: entry.path, query: entry.query };
-        default:
-          return { action: "unknown" };
-      }
-    });
+  return raw.map((entry: any): CommandAction => {
+    switch (entry?.type) {
+      case "read":
+        return { action: "read", path: entry.path };
+      case "listFiles":
+        return { action: "list", path: entry.path };
+      case "search":
+        return { action: "search", path: entry.path, query: entry.query };
+      default:
+        return { action: "unknown" };
+    }
+  });
 }

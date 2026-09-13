@@ -21,10 +21,14 @@ async function withExtension(source: string | null, fn: () => Promise<void>) {
 }
 
 test("a configured extension that throws on import stops the load", () =>
-  withExtension(`throw new Error("bad build");`, () => assert.rejects(loadExtension(), /failed to load.*bad build/)));
+  withExtension(`throw new Error("bad build");`, () =>
+    assert.rejects(loadExtension(), /failed to load.*bad build/),
+  ));
 
 test("a configured module that is not an extension is refused", () =>
-  withExtension(`export default { version: "1" };`, () => assert.rejects(loadExtension(), /did not export a Portrail extension/)));
+  withExtension(`export default { version: "1" };`, () =>
+    assert.rejects(loadExtension(), /did not export a Portrail extension/),
+  ));
 
 test("a configured path that does not exist is refused rather than ignored", () =>
   withExtension(null, () => assert.rejects(loadExtension(), /was not found/)));
@@ -33,7 +37,10 @@ test("with nothing configured and no extension installed, the loader reports not
   const previous = process.env.PORTRAIL_EXTENSION;
   delete process.env.PORTRAIL_EXTENSION;
   try {
-    assert.deepEqual(await loadExtension(), { extension: null, detail: "not installed" });
+    assert.deepEqual(await loadExtension(), {
+      extension: null,
+      detail: "not installed",
+    });
   } finally {
     if (previous !== undefined) process.env.PORTRAIL_EXTENSION = previous;
   }
@@ -42,5 +49,8 @@ test("with nothing configured and no extension installed, the loader reports not
 test("the daemon does not assemble with a broken configured extension", () =>
   withExtension(`throw new Error("bad build");`, async () => {
     const { assemble } = await import("../src/daemon.ts");
-    await assert.rejects(assemble({ home: mkdtempSync(join(tmpdir(), "portrail-home-")) }), /bad build/);
+    await assert.rejects(
+      assemble({ home: mkdtempSync(join(tmpdir(), "portrail-home-")) }),
+      /bad build/,
+    );
   }));

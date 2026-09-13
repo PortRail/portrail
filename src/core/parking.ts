@@ -16,7 +16,11 @@ interface Parked {
 export class ParkingLot {
   private parked = new Map<string, Parked>();
 
-  park(operationId: string, timeoutMs: number, onTimeout: () => Decision): Promise<Decision> {
+  park(
+    operationId: string,
+    timeoutMs: number,
+    onTimeout: () => Decision,
+  ): Promise<Decision> {
     return new Promise<Decision>((resolve) => {
       const timer = setTimeout(() => {
         this.parked.delete(operationId);

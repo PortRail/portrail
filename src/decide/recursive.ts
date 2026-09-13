@@ -14,21 +14,104 @@ export interface RecursiveRead {
 
 /** rg options that take a value, so the value is not mistaken for a path. */
 const RG_VALUE = new Set([
-  "-A", "-B", "-C", "-E", "-M", "-T", "-d", "-e", "-f", "-g", "-j", "-m", "-r", "-t",
-  "--after-context", "--before-context", "--context", "--color", "--colors", "--dfa-size-limit", "--encoding", "--engine",
-  "--file", "--glob", "--iglob", "--ignore-file", "--max-columns", "--max-count", "--max-depth", "--max-filesize",
-  "--path-separator", "--pre", "--pre-glob", "--regex-size-limit", "--regexp", "--replace", "--sort", "--sortr",
-  "--threads", "--type", "--type-add", "--type-clear", "--type-not",
+  "-A",
+  "-B",
+  "-C",
+  "-E",
+  "-M",
+  "-T",
+  "-d",
+  "-e",
+  "-f",
+  "-g",
+  "-j",
+  "-m",
+  "-r",
+  "-t",
+  "--after-context",
+  "--before-context",
+  "--context",
+  "--color",
+  "--colors",
+  "--dfa-size-limit",
+  "--encoding",
+  "--engine",
+  "--file",
+  "--glob",
+  "--iglob",
+  "--ignore-file",
+  "--max-columns",
+  "--max-count",
+  "--max-depth",
+  "--max-filesize",
+  "--path-separator",
+  "--pre",
+  "--pre-glob",
+  "--regex-size-limit",
+  "--regexp",
+  "--replace",
+  "--sort",
+  "--sortr",
+  "--threads",
+  "--type",
+  "--type-add",
+  "--type-clear",
+  "--type-not",
 ]);
 const GREP_VALUE = new Set([
-  "-A", "-B", "-C", "-D", "-d", "-e", "-f", "-m",
-  "--after-context", "--before-context", "--context", "--binary-files", "--color", "--colour", "--devices", "--directories",
-  "--exclude", "--exclude-dir", "--exclude-from", "--file", "--group-separator", "--include", "--label", "--max-count", "--regexp",
+  "-A",
+  "-B",
+  "-C",
+  "-D",
+  "-d",
+  "-e",
+  "-f",
+  "-m",
+  "--after-context",
+  "--before-context",
+  "--context",
+  "--binary-files",
+  "--color",
+  "--colour",
+  "--devices",
+  "--directories",
+  "--exclude",
+  "--exclude-dir",
+  "--exclude-from",
+  "--file",
+  "--group-separator",
+  "--include",
+  "--label",
+  "--max-count",
+  "--regexp",
 ]);
 const DIFF_VALUE = new Set([
-  "-C", "-D", "-F", "-I", "-L", "-S", "-U", "-W", "-X", "-x",
-  "--context", "--unified", "--ifdef", "--show-function-line", "--ignore-matching-lines", "--label", "--starting-file",
-  "--width", "--exclude", "--exclude-from", "--from-file", "--to-file", "--tabsize", "--color", "--palette", "--horizon-lines",
+  "-C",
+  "-D",
+  "-F",
+  "-I",
+  "-L",
+  "-S",
+  "-U",
+  "-W",
+  "-X",
+  "-x",
+  "--context",
+  "--unified",
+  "--ifdef",
+  "--show-function-line",
+  "--ignore-matching-lines",
+  "--label",
+  "--starting-file",
+  "--width",
+  "--exclude",
+  "--exclude-from",
+  "--from-file",
+  "--to-file",
+  "--tabsize",
+  "--color",
+  "--palette",
+  "--horizon-lines",
 ]);
 
 interface Parsed {
@@ -41,7 +124,12 @@ interface Parsed {
 
 /** Split a tool's words into flags and operands, knowing which flags take a value. */
 function parseFlags(words: readonly string[], valueFlags: Set<string>): Parsed {
-  const parsed: Parsed = { operands: [], shortFlags: "", longFlags: [], patternGiven: false };
+  const parsed: Parsed = {
+    operands: [],
+    shortFlags: "",
+    longFlags: [],
+    patternGiven: false,
+  };
   for (let index = 1; index < words.length; index++) {
     const word = words[index]!;
     if (word === "--") {
@@ -91,36 +179,63 @@ function directories(operands: readonly string[], cwd: string): string[] {
  * recursively, which ones and how; otherwise null. Only content searches count —
  * `find`, `ls -R` and `tree` list names.
  */
-export function recursiveReadOf(words: readonly string[], cwd: string): RecursiveRead | null {
+export function recursiveReadOf(
+  words: readonly string[],
+  cwd: string,
+): RecursiveRead | null {
   const program = words[0];
   if (program === "rg") {
     const parsed = parseFlags(words, RG_VALUE);
-    if (parsed.longFlags.some((flag) => ["--files", "--type-list", "--help", "--version"].includes(flag))) return null;
+    if (
+      parsed.longFlags.some((flag) =>
+        ["--files", "--type-list", "--help", "--version"].includes(flag),
+      )
+    )
+      return null;
     const paths = parsed.patternGiven ? parsed.operands : parsed.operands.slice(1);
-    const unrestricted = (parsed.shortFlags.match(/u/g) ?? []).length + parsed.longFlags.filter((flag) => flag === "--unrestricted").length;
+    const unrestricted =
+      (parsed.shortFlags.match(/u/g) ?? []).length +
+      parsed.longFlags.filter((flag) => flag === "--unrestricted").length;
     return {
       dirs: paths.length ? directories(paths, cwd) : [cwd],
-      hidden: parsed.longFlags.includes("--hidden") || parsed.shortFlags.includes(".") || unrestricted >= 2,
+      hidden:
+        parsed.longFlags.includes("--hidden") ||
+        parsed.shortFlags.includes(".") ||
+        unrestricted >= 2,
       follow: parsed.shortFlags.includes("L") || parsed.longFlags.includes("--follow"),
-      respectsIgnore: unrestricted === 0 && !parsed.longFlags.some((flag) => flag.startsWith("--no-ignore")),
+      respectsIgnore:
+        unrestricted === 0 &&
+        !parsed.longFlags.some((flag) => flag.startsWith("--no-ignore")),
     };
   }
   if (program === "grep") {
     const parsed = parseFlags(words, GREP_VALUE);
-    const recursive = /[rR]/.test(parsed.shortFlags) || parsed.longFlags.some((flag) => flag === "--recursive" || flag === "--dereference-recursive");
+    const recursive =
+      /[rR]/.test(parsed.shortFlags) ||
+      parsed.longFlags.some(
+        (flag) => flag === "--recursive" || flag === "--dereference-recursive",
+      );
     if (!recursive) return null;
     const paths = parsed.patternGiven ? parsed.operands : parsed.operands.slice(1);
     return {
       dirs: paths.length ? directories(paths, cwd) : [cwd],
       hidden: true,
-      follow: parsed.shortFlags.includes("R") || parsed.longFlags.includes("--dereference-recursive"),
+      follow:
+        parsed.shortFlags.includes("R") ||
+        parsed.longFlags.includes("--dereference-recursive"),
       respectsIgnore: false,
     };
   }
   if (program === "diff") {
     const parsed = parseFlags(words, DIFF_VALUE);
-    if (!parsed.shortFlags.includes("r") && !parsed.longFlags.includes("--recursive")) return null;
-    return { dirs: directories(parsed.operands, cwd), hidden: true, follow: true, respectsIgnore: false };
+    if (!parsed.shortFlags.includes("r") && !parsed.longFlags.includes("--recursive"))
+      return null;
+    return {
+      dirs: directories(parsed.operands, cwd),
+      hidden: true,
+      follow: true,
+      respectsIgnore: false,
+    };
   }
   return null;
 }

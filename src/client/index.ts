@@ -96,7 +96,12 @@ interface Page<T> {
   nextOffset?: number;
 }
 
-const TERMINAL = new Set<RunState>(["succeeded", "failed", "cancelled", "outcome_unknown"]);
+const TERMINAL = new Set<RunState>([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "outcome_unknown",
+]);
 
 export class PortrailClient {
   private readonly base: string;
@@ -104,10 +109,15 @@ export class PortrailClient {
   constructor(readonly options: PortrailClientOptions) {
     const url = new URL(options.baseUrl);
     if (url.username || url.password || url.search || url.hash)
-      throw new Error("baseUrl must be a plain origin, without credentials, query or fragment.");
+      throw new Error(
+        "baseUrl must be a plain origin, without credentials, query or fragment.",
+      );
     if (
       url.protocol !== "https:" &&
-      !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
+      !(
+        url.protocol === "http:" &&
+        ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+      )
     )
       throw new Error(
         "Use https, or plain http only for loopback. API keys must not travel in the clear.",
@@ -126,13 +136,17 @@ export class PortrailClient {
     } = {},
   ): Promise<T> {
     const method = init.method ?? "GET";
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.options.token}` };
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.options.token}`,
+    };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
     // Only run creation is replayed safely by the server; a key must never be minted from a stored response.
     if (init.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
 
     // A caller's signal adds a way to stop; it never removes the timeout.
-    const timeout = AbortSignal.timeout(init.timeoutMs ?? this.options.timeoutMs ?? 30_000);
+    const timeout = AbortSignal.timeout(
+      init.timeoutMs ?? this.options.timeoutMs ?? 30_000,
+    );
     const response = await (this.options.fetch ?? fetch)(`${this.base}/v1${path}`, {
       method,
       headers,
@@ -142,7 +156,9 @@ export class PortrailClient {
     });
     if (response.status === 204) return undefined as T;
     const text = await response.text();
-    const isJson = /^application\/json/i.test(response.headers.get("content-type") ?? "") || /^\s*[\[{]/.test(text);
+    const isJson =
+      /^application\/json/i.test(response.headers.get("content-type") ?? "") ||
+      /^\s*[\[{]/.test(text);
     let payload: any = null;
     if (isJson) {
       try {
@@ -156,13 +172,26 @@ export class PortrailClient {
       // page). Surface that as a typed error with the status, never as a parse crash.
       throw new PortrailClientError(
         response.status,
-        payload?.error?.code ?? (response.status >= 500 ? "UPSTREAM_ERROR" : "HTTP_ERROR"),
+        payload?.error?.code ??
+          (response.status >= 500 ? "UPSTREAM_ERROR" : "HTTP_ERROR"),
         payload?.error?.message ??
-          `Request failed with ${response.status}${text ? `: ${text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160)}` : "."}`,
+          `Request failed with ${response.status}${
+            text
+              ? `: ${text
+                  .replace(/<[^>]+>/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim()
+                  .slice(0, 160)}`
+              : "."
+          }`,
         payload?.error?.details,
       );
     if (!isJson || payload === null)
-      throw new PortrailClientError(502, "NOT_JSON", `Expected JSON from ${path} but got ${response.headers.get("content-type") ?? "no content type"}. Is a proxy in the way?`);
+      throw new PortrailClientError(
+        502,
+        "NOT_JSON",
+        `Expected JSON from ${path} but got ${response.headers.get("content-type") ?? "no content type"}. Is a proxy in the way?`,
+      );
     return payload as T;
   }
 
@@ -175,7 +204,14 @@ export class PortrailClient {
         timeoutMs: (input.wait ?? 0) * 1000 + 30_000,
       }),
     get: (runId: string) => this.request<Run>(`/runs/${encodeURIComponent(runId)}`),
-    list: (query: { session?: string; state?: RunState; limit?: number; offset?: number } = {}) =>
+    list: (
+      query: {
+        session?: string;
+        state?: RunState;
+        limit?: number;
+        offset?: number;
+      } = {},
+    ) =>
       this.request<Page<Run>>(
         `/runs?${new URLSearchParams(
           Object.entries(query)
@@ -183,32 +219,58 @@ export class PortrailClient {
             .map(([key, value]): [string, string] => [key, String(value)]),
         )}`,
       ),
-    cancel: (runId: string) => this.request<Run>(`/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST", body: {} }),
+    cancel: (runId: string) =>
+      this.request<Run>(`/runs/${encodeURIComponent(runId)}/cancel`, {
+        method: "POST",
+        body: {},
+      }),
     reply: (runId: string, text: string) =>
-      this.request<Run>(`/runs/${encodeURIComponent(runId)}/reply`, { method: "POST", body: { text } }),
+      this.request<Run>(`/runs/${encodeURIComponent(runId)}/reply`, {
+        method: "POST",
+        body: { text },
+      }),
     /** Poll until the run ends. Prefer `events()` when you can hold a connection. */
-    wait: async (runId: string, options: { intervalMs?: number; signal?: AbortSignal } = {}) => {
+    wait: async (
+      runId: string,
+      options: { intervalMs?: number; signal?: AbortSignal } = {},
+    ) => {
       for (;;) {
         options.signal?.throwIfAborted();
-        const run = await this.request<Run>(`/runs/${encodeURIComponent(runId)}`, { signal: options.signal });
+        const run = await this.request<Run>(`/runs/${encodeURIComponent(runId)}`, {
+          signal: options.signal,
+        });
         if (TERMINAL.has(run.state)) return run;
         await sleep(options.intervalMs ?? 2000, options.signal);
       }
     },
-    events: (runId: string, options: { after?: number; signal?: AbortSignal; reconnect?: boolean } = {}) =>
-      this.stream(`/runs/${encodeURIComponent(runId)}/events`, options),
+    events: (
+      runId: string,
+      options: { after?: number; signal?: AbortSignal; reconnect?: boolean } = {},
+    ) => this.stream(`/runs/${encodeURIComponent(runId)}/events`, options),
   };
 
   readonly sessions = {
     list: () => this.request<Page<any>>("/sessions"),
-    get: (sessionId: string) => this.request<any>(`/sessions/${encodeURIComponent(sessionId)}`),
-    close: (sessionId: string) => this.request<any>(`/sessions/${encodeURIComponent(sessionId)}/close`, { method: "POST", body: {} }),
+    get: (sessionId: string) =>
+      this.request<any>(`/sessions/${encodeURIComponent(sessionId)}`),
+    close: (sessionId: string) =>
+      this.request<any>(`/sessions/${encodeURIComponent(sessionId)}/close`, {
+        method: "POST",
+        body: {},
+      }),
   };
 
   readonly workspaces = {
-    list: () => this.request<{ items: Array<{ id: string; name: string; root: string; createdAt: string }> }>("/workspaces"),
-    add: (input: { name: string; root: string }) => this.request<any>("/workspaces", { method: "POST", body: input }),
-    remove: (ref: string) => this.request<void>(`/workspaces/${encodeURIComponent(ref)}`, { method: "DELETE" }),
+    list: () =>
+      this.request<{
+        items: Array<{ id: string; name: string; root: string; createdAt: string }>;
+      }>("/workspaces"),
+    add: (input: { name: string; root: string }) =>
+      this.request<any>("/workspaces", { method: "POST", body: input }),
+    remove: (ref: string) =>
+      this.request<void>(`/workspaces/${encodeURIComponent(ref)}`, {
+        method: "DELETE",
+      }),
   };
 
   readonly agents = {
@@ -217,13 +279,20 @@ export class PortrailClient {
 
   readonly keys = {
     list: () => this.request<{ items: any[] }>("/keys"),
-    create: (input: { name: string; scopes?: string[]; expiresInDays?: number | null }) =>
-      this.request<any>("/keys", { method: "POST", body: input }),
-    revoke: (keyId: string) => this.request<any>(`/keys/${encodeURIComponent(keyId)}`, { method: "DELETE" }),
+    create: (input: {
+      name: string;
+      scopes?: string[];
+      expiresInDays?: number | null;
+    }) => this.request<any>("/keys", { method: "POST", body: input }),
+    revoke: (keyId: string) =>
+      this.request<any>(`/keys/${encodeURIComponent(keyId)}`, { method: "DELETE" }),
   };
 
   health() {
-    return (this.options.fetch ?? fetch)(`${this.base}/health`, { redirect: "error", headers: { Authorization: `Bearer ${this.options.token}` } }).then((r) => r.json());
+    return (this.options.fetch ?? fetch)(`${this.base}/health`, {
+      redirect: "error",
+      headers: { Authorization: `Bearer ${this.options.token}` },
+    }).then((r) => r.json());
   }
 
   /** Resumable server-sent events with exponential backoff. */
@@ -235,16 +304,23 @@ export class PortrailClient {
     let attempt = 0;
     // An abort simply ends the pause; the loop condition then exits.
     const pause = () =>
-      sleep(Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6)) * (0.8 + Math.random() * 0.4), options.signal).catch(() => {});
+      sleep(
+        Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6)) *
+          (0.8 + Math.random() * 0.4),
+        options.signal,
+      ).catch(() => {});
 
     while (!options.signal?.aborted) {
       let response: Response;
       try {
-        response = await (this.options.fetch ?? fetch)(`${this.base}/v1${path}?after=${after}`, {
-          headers: { Authorization: `Bearer ${this.options.token}` },
-          redirect: "error",
-          signal: options.signal,
-        });
+        response = await (this.options.fetch ?? fetch)(
+          `${this.base}/v1${path}?after=${after}`,
+          {
+            headers: { Authorization: `Bearer ${this.options.token}` },
+            redirect: "error",
+            signal: options.signal,
+          },
+        );
       } catch (error) {
         if (options.signal?.aborted) return;
         if (options.reconnect === false) throw error;
@@ -252,8 +328,14 @@ export class PortrailClient {
         continue;
       }
       if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
-        throw new PortrailClientError(response.status, payload.error?.code ?? "HTTP_ERROR", payload.error?.message ?? "Stream refused.");
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: { code?: string; message?: string };
+        };
+        throw new PortrailClientError(
+          response.status,
+          payload.error?.code ?? "HTTP_ERROR",
+          payload.error?.message ?? "Stream refused.",
+        );
       }
       let sawTerminal = false;
       try {
@@ -267,7 +349,8 @@ export class PortrailClient {
         }
       } catch (error) {
         if (options.signal?.aborted) return;
-        if (options.reconnect === false || /SSE|JSON/.test((error as Error).message)) throw error;
+        if (options.reconnect === false || /SSE|JSON/.test((error as Error).message))
+          throw error;
       } finally {
         await response.body?.cancel().catch(() => {});
       }
@@ -277,7 +360,9 @@ export class PortrailClient {
   }
 }
 
-export async function* parseSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<PortrailEvent> {
+export async function* parseSSE(
+  stream: ReadableStream<Uint8Array>,
+): AsyncGenerator<PortrailEvent> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -285,7 +370,10 @@ export async function* parseSSE(stream: ReadableStream<Uint8Array>): AsyncGenera
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(
+        /\r\n/g,
+        "\n",
+      );
       if (buffer.length > 4 * 1024 * 1024) throw new Error("SSE frame too large");
       let boundary: number;
       while ((boundary = buffer.indexOf("\n\n")) >= 0) {

@@ -7,7 +7,9 @@ test("a session may put 100 events on the wire per second; the rest wait for the
   const pacer = new SessionEventPacer(() => now);
   let left = 150;
   let written = 0;
-  const subscription = pacer.subscribe("ses", () => (left ? (left--, written++, true) : false));
+  const subscription = pacer.subscribe("ses", () =>
+    left ? (left--, written++, true) : false,
+  );
   subscription.wake();
   assert.equal(written, 100);
   now = 1001;

@@ -30,7 +30,11 @@ export interface Reach {
  * only when the tool reads them, symlinks only when the tool follows them. Bounded,
  * because a judgement that takes a second is a judgement nobody waits for.
  */
-export function reachableFiles(dir: string, declaredRoot: string, options: { hidden: boolean; follow: boolean; limit?: number }): Reach {
+export function reachableFiles(
+  dir: string,
+  declaredRoot: string,
+  options: { hidden: boolean; follow: boolean; limit?: number },
+): Reach {
   const limit = options.limit ?? REACH_LIMIT;
   const root = real(declaredRoot);
   const start = real(dir);

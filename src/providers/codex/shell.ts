@@ -4,7 +4,8 @@
  * policy layer is shown the command a person would type, and the wrapper is kept
  * alongside as argv for anyone who needs the exact invocation.
  */
-const SHELLS = /^(?:\/bin\/|\/usr\/bin\/|\/usr\/local\/bin\/|\/opt\/homebrew\/bin\/)?(?:sh|bash|zsh|dash|fish)$/;
+const SHELLS =
+  /^(?:\/bin\/|\/usr\/bin\/|\/usr\/local\/bin\/|\/opt\/homebrew\/bin\/)?(?:sh|bash|zsh|dash|fish)$/;
 
 export interface UnwrappedCommand {
   /** What a person would type. */
@@ -40,7 +41,11 @@ export function shellSplit(input: string): string[] {
     }
     if (quote === '"') {
       if (char === '"') quote = null;
-      else if (char === "\\" && index + 1 < input.length && '"\\$`'.includes(input[index + 1]!))
+      else if (
+        char === "\\" &&
+        index + 1 < input.length &&
+        '"\\$`'.includes(input[index + 1]!)
+      )
         current += input[++index];
       else current += char;
       continue;

@@ -111,15 +111,28 @@ class FakeRun implements ProviderHandle {
           "exec" in step
             ? { ...base, kind: "exec", command: step.exec, cwd: context.workspace.root }
             : "write" in step
-              ? { ...base, kind: "write", changes: [{ path: step.write, change: "update" }] }
+              ? {
+                  ...base,
+                  kind: "write",
+                  changes: [{ path: step.write, change: "update" }],
+                }
               : "read" in step
                 ? { ...base, kind: "read", paths: [step.read] }
                 : { ...base, kind: "net", host: step.net };
         const decision = await context.decide(operation);
         if (decision.verdict === "allow") {
           if (operation.kind === "exec") {
-            context.emit({ type: "command.started", opId: operation.id, command: operation.command, cwd: operation.cwd });
-            context.emit({ type: "command.output", opId: operation.id, text: `ran: ${operation.command}\n` });
+            context.emit({
+              type: "command.started",
+              opId: operation.id,
+              command: operation.command,
+              cwd: operation.cwd,
+            });
+            context.emit({
+              type: "command.output",
+              opId: operation.id,
+              text: `ran: ${operation.command}\n`,
+            });
             context.emit({ type: "command.finished", opId: operation.id, exitCode: 0 });
           } else if (operation.kind === "write") {
             context.emit({ type: "files.changed", changes: operation.changes });
@@ -127,14 +140,19 @@ class FakeRun implements ProviderHandle {
           context.emit({ type: "text", text: `[${operation.kind} ok] ` });
         } else {
           denied++;
-          context.emit({ type: "text", text: `[${operation.kind} refused: ${decision.reason}] ` });
+          context.emit({
+            type: "text",
+            text: `[${operation.kind} refused: ${decision.reason}] `,
+          });
         }
       }
     }
     context.emit({ type: "usage", inputTokens: 10, outputTokens: 20, costUsd: 0 });
     return {
       state: "succeeded",
-      summary: denied ? `Done with ${denied} refusal${denied === 1 ? "" : "s"}.` : "Done.",
+      summary: denied
+        ? `Done with ${denied} refusal${denied === 1 ? "" : "s"}.`
+        : "Done.",
     };
   }
 
@@ -159,7 +177,6 @@ class FakeRun implements ProviderHandle {
   }
 
   close() {
-
     this.cancelled = true;
     this.wake?.();
   }

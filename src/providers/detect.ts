@@ -161,8 +161,12 @@ export async function claudeSdkAvailable(): Promise<{
     const { dirname, join } = await import("node:path");
     let version: string | null = null;
     try {
-      const entry = createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk");
-      const manifest = JSON.parse(readFileSync(join(dirname(entry), "package.json"), "utf8")) as {
+      const entry = createRequire(import.meta.url).resolve(
+        "@anthropic-ai/claude-agent-sdk",
+      );
+      const manifest = JSON.parse(
+        readFileSync(join(dirname(entry), "package.json"), "utf8"),
+      ) as {
         version?: string;
         claudeCodeVersion?: string;
       };
@@ -178,7 +182,6 @@ export async function claudeSdkAvailable(): Promise<{
   }
 }
 
-
 /**
  * Does this machine hold a Claude Code login, without asking Claude anything?
  * The SDK reads the OS keychain on macOS and ~/.claude/.credentials.json elsewhere;
@@ -191,10 +194,15 @@ export async function detectClaudeCredentials(): Promise<{
 }> {
   if (process.env.ANTHROPIC_API_KEY) return { present: true, source: "api_key" };
   const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
-  if (existsSync(join(configDir, ".credentials.json"))) return { present: true, source: "credentials_file" };
+  if (existsSync(join(configDir, ".credentials.json")))
+    return { present: true, source: "credentials_file" };
   if (process.platform === "darwin") {
     try {
-      await run("security", ["find-generic-password", "-s", "Claude Code-credentials"], { timeout: 5000 });
+      await run(
+        "security",
+        ["find-generic-password", "-s", "Claude Code-credentials"],
+        { timeout: 5000 },
+      );
       return { present: true, source: "keychain" };
     } catch {
       // not in the keychain
