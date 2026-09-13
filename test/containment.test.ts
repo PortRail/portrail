@@ -83,8 +83,10 @@ test("home, root, and anything holding Portrail's own data cannot be a workspace
 test("credential stores, tool logins and shell history are protected everywhere", () => {
   const home = homedir();
   const list = protectedPaths();
+  // Compare real paths: on some machines an entry like ~/.azure is itself a symlink.
+  const real = (path: string) => { try { return realpathSync.native(path); } catch { return path; } };
   for (const entry of [".claude.json", ".zsh_history", ".bash_history", ".config/gh", ".config/gcloud", ".azure", ".git-credentials", ".gitconfig"])
-    assert.ok(list.some((p) => p.endsWith("/" + entry)), `${entry} is protected`);
+    assert.ok(list.includes(real(join(home, entry))), `${entry} is protected`);
   const root = realTmp("ws-");
   const exec = (command: string) => containOperation({ ...base, kind: "exec", command, cwd: root }, root).refused ?? "";
   assert.match(exec("cat ~/.claude.json"), /protected everywhere/);
