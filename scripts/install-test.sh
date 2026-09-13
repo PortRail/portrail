@@ -16,9 +16,11 @@ $W init >/dev/null
 $W doctor >/dev/null 2>&1 || true   # agents may be absent; that is not what we test here
 mkdir -p "$tmp/ws"; $W workspace add "$tmp/ws" --name ws >/dev/null
 key=$($W key create t --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).token))')
-$W start --with-fake-agent --port 7499 >"$tmp/daemon.log" 2>&1 &
-for _ in $(seq 1 40); do curl -sf http://127.0.0.1:7499/health >/dev/null 2>&1 && break; sleep 0.25; done
-state=$(curl -s -X POST http://127.0.0.1:7499/v1/runs -H "Authorization: Bearer $key" -H "Content-Type: application/json" \
+# Any free port, so this can run next to a real gateway or a second copy of itself.
+port=$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
+$W start --with-fake-agent --port "$port" >"$tmp/daemon.log" 2>&1 &
+for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:$port/health" >/dev/null 2>&1 && break; sleep 0.25; done
+state=$(curl -s -X POST "http://127.0.0.1:$port/v1/runs" -H "Authorization: Bearer $key" -H "Content-Type: application/json" \
   -d '{"agent":"fake","workspace":"ws","wait":5,"prompt":"[{\"exec\":\"npm test\"},{\"exec\":\"sudo rm -rf /\"}]"}' \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);console.log(r.state+" | "+r.summary)})')
 echo "run: $state"
