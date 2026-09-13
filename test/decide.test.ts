@@ -306,3 +306,22 @@ test("deny rules see through wrappers, shell keywords, parentheses and the progr
   assert.equal((await defaults.decide(exec("./bin/git status"), context)).verdict, "deny", "a workspace script is not git, whatever it is called");
   assert.equal((await defaults.decide(exec("/usr/bin/env node --version"), context)).verdict, "deny", "allow rules never match by bare program name");
 });
+
+test("the built-in allow list names whole commands, and the deny list covers the write and code-running switches of read-only tools", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "npm testx", "npm run build-and-deploy", "lsof -i", "sortx",
+    "node --test evil.js", "node --test --import ./evil.mjs", "node -p 1", "node -pe 1", "node -r ./x.js y",
+    "git branch -D main", "git branch --delete main", "git branch -M main x",
+    "git log --output=out.txt", "git diff --output=x",
+    "sort -o out.txt f", "sort --output=x f", "sort --compress-program=sh f",
+    "rg --pre cat foo src", "cat .envrc", "git show HEAD:.envrc",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "deny", command);
+  for (const command of [
+    "npm test", "npm test -- test/a.test.ts", "npm run test:unit", "npm run build", "npm run lint:fix", "pnpm run typecheck", "yarn test",
+    "ls", "ls -la", "sort -u", "tsc", "tsc --noEmit", "node --test", "git status", "git status --short",
+    "git branch", "git branch --show-current", "git branch -a", "git branch -vv", "git branch --list 'fix-*'", "git branch --merged",
+    "date", "date +%Y", "uname -a", "sed -n '1,40p' src/a.ts",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "allow", command);
+});
