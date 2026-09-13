@@ -16,6 +16,7 @@ Run
                                             Needs a running gateway and PORTRAIL_KEY (or --key)
   approve [id] | deny [id]                  Answer an operation the rules put in decide.ask — once, from this machine
   logs [-f] [--limit n]                     Recent runs and decisions; -f follows live events
+  prune [--days n]                          Remove sessions older than the retention window now
   service install [start flags] | uninstall | status
 
 Options
@@ -67,6 +68,11 @@ Portrail Pro adds answers from anywhere, by anyone, with scopes and a record: po
   },
   logs: `portrail logs [-f] [--limit <n>] [--json]
 Recent runs with their decision counts. -f follows new events across all sessions.`,
+  prune: `portrail prune [--days <n>] [--json]
+Removes sessions, with their runs, operations and events, whose last activity is older than n days
+(default: retentionDays in config.json, 30). Runs automatically when the gateway starts and every hour;
+this does it now. Safe next to a running gateway: sessions with an active run are kept. An installed
+extension prunes its own records with the same cutoff.`,
   service: `portrail service install [start flags] | uninstall | status
 Installs a launchd agent (macOS) or systemd user unit (Linux) that runs \`portrail start\` at login.`,
 };

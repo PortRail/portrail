@@ -49,6 +49,16 @@ export interface CreateRunInput {
   metadata?: Record<string, unknown>;
 }
 
+/** What one retention pass removed, and the moment before which things were considered old. */
+export interface RetentionResult {
+  cutoff: string;
+  sessions: number;
+  runs: number;
+  operations: number;
+  events: number;
+  commands: number;
+}
+
 /** The answer to any question asked on behalf of a run that is over. */
 const NOT_ACTIVE: Decision = {
   verdict: "deny",
@@ -961,26 +971,43 @@ export class Gateway extends EventEmitter {
 
   // ------------------------------------------------------------ lifecycle
 
-  retention(retentionDays: number) {
+  retention(retentionDays: number): RetentionResult {
     const cutoff = new Date(Date.now() - retentionDays * 86400000).toISOString();
+    const removed: RetentionResult = {
+      cutoff,
+      sessions: 0,
+      runs: 0,
+      operations: 0,
+      events: 0,
+      commands: 0,
+    };
     this.store.tx(() => {
+      // A worker's run may sit in a terminal state for a moment before the worker is gone.
+      const live = new Set<string>();
+      for (const runId of this.workers.keys()) {
+        const run = this.store.get<RunRecord>("run", runId);
+        if (run) live.add(run.sessionId);
+      }
       for (const session of this.store.list<SessionRecord>("session")) {
-        const runs = this.store.list<RunRecord>("run", session.id);
+        if (session.lastActivityAt >= cutoff || live.has(session.id)) continue;
         if (
-          runs.some(
-            (run) => !TERMINAL_STATES.has(run.state) || this.workers.has(run.id),
-          )
+          this.store.count("run", { sessionId: session.id, state: ACTIVE_STATES }) > 0
         )
           continue;
-        if (session.lastActivityAt >= cutoff) continue;
-        for (const run of runs) this.store.remove("run", run.id);
-        for (const op of this.store.list<OperationRecord>("operation", session.id))
-          this.store.remove("operation", op.id);
-        this.store.db.prepare("DELETE FROM events WHERE session_id=?").run(session.id);
+        removed.runs += this.store.removeWhere("run", { sessionId: session.id });
+        removed.operations += this.store.removeWhere("operation", {
+          sessionId: session.id,
+        });
+        removed.events += this.store.removeEvents(session.id);
         this.store.remove("session", session.id);
+        removed.sessions += 1;
       }
-      this.store.db.prepare("DELETE FROM commands WHERE created_at<?").run(cutoff);
+      removed.commands = Number(
+        this.store.db.prepare("DELETE FROM commands WHERE created_at<?").run(cutoff)
+          .changes,
+      );
     });
+    return removed;
   }
 
   async shutdown() {

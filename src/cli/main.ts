@@ -69,6 +69,7 @@ async function main(): Promise<number> {
     case "approve":
     case "deny":
     case "service":
+    case "prune":
     case "logs": {
       const commands = await import("./commands.ts");
       return commands[args.command](args);

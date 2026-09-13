@@ -80,6 +80,13 @@ export interface Extension {
   start?(host: ExtensionHost, listening: { url: string }): Promise<void> | void;
   /** Extra CLI subcommands, e.g. `portrail relay`. */
   commands?: Record<string, ExtensionCommand>;
+  /**
+   * Called after the core has removed sessions older than `cutoff` (an ISO timestamp):
+   * once when the daemon starts, then hourly, and from `portrail prune`. The last of
+   * these runs in a CLI process next to a possibly running daemon, so touch only
+   * `host.store` here. An error is reported on stderr and does not stop the daemon.
+   */
+  onRetention?(cutoff: string, host: ExtensionHost): void | Promise<void>;
   /** Called once during shutdown. */
   close?(): Promise<void> | void;
 }
