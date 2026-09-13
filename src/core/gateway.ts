@@ -59,6 +59,12 @@ interface Worker {
   epoch: string;
   abort: AbortController;
   handle: ProviderHandle | null;
+  /**
+   * What the decider may build on: session-scoped allows from earlier runs of the
+   * session, then every decision of this run as it is made. Kept here so a permission
+   * question does not re-read the session's whole history.
+   */
+  decisions: Array<{ operation: Operation; decision: Decision }>;
 }
 
 /**
@@ -473,6 +479,7 @@ export class Gateway extends EventEmitter {
           continue;
         }
         const worker: Worker = {
+          decisions: [],
           epoch: newId("wrk"),
           abort: new AbortController(),
           handle: null,
@@ -586,6 +593,11 @@ export class Gateway extends EventEmitter {
       }
     };
 
+    // Anything an earlier run of this session allowed "for the session" still carries.
+    worker.decisions = this.store
+      .select<OperationRecord>("operation", { sessionId: session.id, state: "decided" })
+      .filter((op) => op.decision?.scope === "session")
+      .map((op) => ({ operation: op.operation, decision: op.decision! }));
     try {
       const handle = await provider.start({
         sessionId: session.id,
@@ -596,7 +608,7 @@ export class Gateway extends EventEmitter {
         model: run.model ?? undefined,
         maxSeconds: Math.round((Date.parse(run.deadlineAt) - Date.now()) / 1000),
         signal: worker.abort.signal,
-        decide: (operation) => this.decide(run.id, worker.epoch, operation, workspace),
+        decide: (operation) => this.decide(run.id, worker, operation, workspace),
         emit: onEvent,
       });
       worker.handle = handle;
@@ -673,11 +685,11 @@ export class Gateway extends EventEmitter {
    */
   private async decide(
     runId: string,
-    workerEpoch: string,
+    worker: Worker,
     operation: Operation,
     workspace: Workspace,
   ): Promise<Decision> {
-    if (this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
+    if (this.inactive(runId, worker.epoch)) return NOT_ACTIVE;
     const run = this.run(runId);
 
     const record: OperationRecord = {
@@ -702,9 +714,11 @@ export class Gateway extends EventEmitter {
     });
 
     const settle = (decision: Decision, decidedBy: string): Decision => {
+      let recorded = false;
       this.store.tx(() => {
         const current = this.store.get<OperationRecord>("operation", operation.id);
         if (!current || current.state === "decided") return;
+        recorded = true;
         const latest = this.run(runId);
         const counts = {
           ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }),
@@ -733,6 +747,7 @@ export class Gateway extends EventEmitter {
           runId,
         );
       });
+      if (recorded) worker.decisions.push({ operation: record.operation, decision });
       return decision;
     };
 
@@ -758,13 +773,7 @@ export class Gateway extends EventEmitter {
       workspaceRoot: contained.root,
       // Everything decided in this run, plus anything allowed "for this session"
       // by an earlier run of the same session. The decider chooses what carries.
-      priorDecisions: this.store
-        .list<OperationRecord>("operation", run.sessionId)
-        .filter(
-          (op) =>
-            op.decision && (op.runId === runId || op.decision.scope === "session"),
-        )
-        .map((op) => ({ operation: op.operation, decision: op.decision! })),
+      priorDecisions: [...worker.decisions],
     };
 
     let decision: Decision;
@@ -772,7 +781,7 @@ export class Gateway extends EventEmitter {
       decision = await this.decider.decide(operation, context);
       // The decider took its time; the run may have been cancelled meanwhile, and a
       // yes to a run that is over must never reach the agent.
-      if (decision.verdict !== "deny" && this.inactive(runId, workerEpoch))
+      if (decision.verdict !== "deny" && this.inactive(runId, worker.epoch))
         return NOT_ACTIVE;
     } catch (error) {
       return settle(
@@ -816,7 +825,7 @@ export class Gateway extends EventEmitter {
       }),
     );
 
-    if (answered.verdict === "allow" && this.inactive(runId, workerEpoch))
+    if (answered.verdict === "allow" && this.inactive(runId, worker.epoch))
       return NOT_ACTIVE;
     const decidedBy = this.store.get<OperationRecord>(
       "operation",
@@ -838,6 +847,8 @@ export class Gateway extends EventEmitter {
       if (this.run(runId).state === "waiting_for_approval")
         this.setState(runId, "running");
     });
+    if (decidedBy)
+      worker.decisions.push({ operation: record.operation, decision: answered });
     return decidedBy ? answered : settle(answered, "portrail:timeout");
   }
 

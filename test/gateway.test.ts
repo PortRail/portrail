@@ -563,3 +563,44 @@ test("the queue limit counts only queued runs, however many finished ones exist"
   assert.equal(store.select("run", { state: "queued" }).length, 2);
   await gateway.shutdown();
 });
+
+test("a decision answered by hand earlier in the same run reaches the decider as a prior", async () => {
+  const seen: number[] = [];
+  const asking: Decider = {
+    name: "asking",
+    decide: async (_operation, context) => {
+      seen.push(context.priorDecisions.length);
+      return { verdict: "ask", reason: "a person decides" };
+    },
+  };
+  const { gateway } = testGateway({ decider: asking, approvalTimeoutMs: 5000 });
+  const run = gateway.createRun({
+    workspace: "work",
+    agent: "fake",
+    prompt: script([{ exec: "a" }, { exec: "b" }]),
+  });
+  const answered: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    for (
+      let tick = 0;
+      tick < 200 &&
+      !gateway
+        .listOperations({ state: "pending" })
+        .some((op) => !answered.includes(op.id));
+      tick++
+    )
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    const pending = gateway
+      .listOperations({ state: "pending" })
+      .find((op) => !answered.includes(op.id))!;
+    answered.push(pending.id);
+    gateway.resolve(
+      pending.id,
+      { verdict: "allow", reason: "ok", scope: "run" },
+      "tester",
+    );
+  }
+  await untilDone(gateway, run.id);
+  assert.deepEqual(seen, [0, 1], "the second question saw the first answer");
+  await gateway.shutdown();
+});
