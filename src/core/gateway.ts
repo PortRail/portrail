@@ -13,6 +13,8 @@ import {
   type Operation,
   type RunState,
   type Workspace,
+  ACTIVE_STATES,
+  IN_FLIGHT_STATES,
 } from "../types.ts";
 import { parseCommand, type CommandSegment } from "../decide/builtin.ts";
 import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
@@ -116,16 +118,18 @@ export class Gateway extends EventEmitter {
    */
   recover() {
     this.store.tx(() => {
-      for (const run of this.store.list<RunRecord>("run"))
-        if (!TERMINAL_STATES.has(run.state) && run.state !== "queued")
-          this.finish(
-            run.id,
-            "outcome_unknown",
-            "Portrail restarted while this run was in progress. The agent may have completed part of the work; nothing was replayed.",
-          );
-      for (const operation of this.store.list<OperationRecord>("operation"))
-        if (operation.state === "pending" || operation.state === "deciding")
-          this.store.put("operation", { ...operation, state: "expired" });
+      for (const run of this.store.select<RunRecord>("run", {
+        state: IN_FLIGHT_STATES,
+      }))
+        this.finish(
+          run.id,
+          "outcome_unknown",
+          "Portrail restarted while this run was in progress. The agent may have completed part of the work; nothing was replayed.",
+        );
+      for (const operation of this.store.select<OperationRecord>("operation", {
+        state: ["pending", "deciding"],
+      }))
+        this.store.put("operation", { ...operation, state: "expired" });
       this.store.afterCommit(() => void this.pump());
     });
   }
@@ -203,14 +207,11 @@ export class Gateway extends EventEmitter {
   removeWorkspace(ref: string) {
     const workspace = this.workspace(ref);
     const active = this.store
-      .list<SessionRecord>("session")
-      .filter(
-        (session) => session.workspaceId === workspace.id && session.state === "open",
-      )
-      .some((session) =>
-        this.store
-          .list<RunRecord>("run", session.id)
-          .some((run) => !TERMINAL_STATES.has(run.state)),
+      .select<SessionRecord>("session", { state: "open" })
+      .filter((session) => session.workspaceId === workspace.id)
+      .some(
+        (session) =>
+          this.store.count("run", { sessionId: session.id, state: ACTIVE_STATES }) > 0,
       );
     ensure(
       !active,
@@ -262,16 +263,22 @@ export class Gateway extends EventEmitter {
   }
 
   listSessions(): SessionRecord[] {
-    return this.store.list<SessionRecord>("session").reverse();
+    return this.store.select<SessionRecord>("session", { newestFirst: true });
+  }
+
+  /** One page of sessions, newest first, with the total. */
+  pageSessions(
+    limit: number,
+    offset: number,
+  ): { items: SessionRecord[]; total: number } {
+    return this.store.page<SessionRecord>("session", {}, limit, offset);
   }
 
   closeSession(sessionId: string): SessionRecord {
     return this.store.tx(() => {
       const session = this.session(sessionId);
       if (session.state === "closed") return session;
-      const active = this.store
-        .list<RunRecord>("run", sessionId)
-        .some((run) => !TERMINAL_STATES.has(run.state));
+      const active = this.store.count("run", { sessionId, state: ACTIVE_STATES }) > 0;
       ensure(!active, 409, "BUSY", "Cancel the active run before closing the session.");
       this.store.put("session", { ...session, state: "closed" });
       this.emitEvent(sessionId, "session.closed");
@@ -323,16 +330,12 @@ export class Gateway extends EventEmitter {
         });
       }
 
-      const active = this.store
-        .list<RunRecord>("run", session.id)
-        .some((run) => !TERMINAL_STATES.has(run.state));
+      const active =
+        this.store.count("run", { sessionId: session.id, state: ACTIVE_STATES }) > 0;
       ensure(!active, 409, "BUSY", "This session already has a run in progress.");
 
-      const queued = this.store
-        .list<RunRecord>("run")
-        .filter((run) => run.state === "queued");
       ensure(
-        queued.length < this.options.maxQueued,
+        this.store.count("run", { state: "queued" }) < this.options.maxQueued,
         429,
         "QUEUE_FULL",
         "Too many runs are waiting. Try again shortly.",
@@ -400,7 +403,16 @@ export class Gateway extends EventEmitter {
   }
 
   listRuns(sessionId?: string): RunRecord[] {
-    return this.store.list<RunRecord>("run", sessionId).reverse();
+    return this.store.select<RunRecord>("run", { sessionId, newestFirst: true });
+  }
+
+  /** One page of runs, newest first, filtered in the database, with the total. */
+  pageRuns(
+    filter: { sessionId?: string; state?: RunState },
+    limit: number,
+    offset: number,
+  ): { items: RunRecord[]; total: number } {
+    return this.store.page<RunRecord>("run", filter, limit, offset);
   }
 
   private setState(runId: string, state: RunState) {
@@ -449,9 +461,7 @@ export class Gateway extends EventEmitter {
     if (this.pumping || this.closing) return;
     this.pumping = true;
     try {
-      for (const run of this.store
-        .list<RunRecord>("run")
-        .filter((r) => r.state === "queued")) {
+      for (const run of this.store.select<RunRecord>("run", { state: "queued" })) {
         if (this.workers.size >= this.options.maxConcurrent) break;
         const session = this.store.get<SessionRecord>("session", run.sessionId);
         if (!session || session.state !== "open") {
@@ -625,13 +635,10 @@ export class Gateway extends EventEmitter {
       batcher.dispose();
       worker.handle?.close();
       this.store.tx(() => {
-        for (const operation of this.store
-          .list<OperationRecord>("operation", session.id)
-          .filter(
-            (op) =>
-              op.runId === run.id &&
-              (op.state === "pending" || op.state === "deciding"),
-          ))
+        for (const operation of this.store.select<OperationRecord>("operation", {
+          runId: run.id,
+          state: ["pending", "deciding"],
+        }))
           this.store.put("operation", { ...operation, state: "expired" });
       });
     }
@@ -879,14 +886,17 @@ export class Gateway extends EventEmitter {
   listOperations(
     filter: { runId?: string; state?: OperationRecord["state"] } = {},
   ): OperationRecord[] {
-    return this.store
-      .list<OperationRecord>("operation")
-      .filter(
-        (op) =>
-          (!filter.runId || op.runId === filter.runId) &&
-          (!filter.state || op.state === filter.state),
-      )
-      .reverse();
+    return this.store.select<OperationRecord>("operation", {
+      runId: filter.runId,
+      state: filter.state,
+      newestFirst: true,
+    });
+  }
+
+  operation(operationId: string): OperationRecord {
+    const record = this.store.get<OperationRecord>("operation", operationId);
+    ensure(record, 404, "NOT_FOUND", "Operation not found.");
+    return record;
   }
 
   // -------------------------------------------------------------- control

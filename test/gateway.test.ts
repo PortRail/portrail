@@ -511,3 +511,55 @@ test("an allow that arrives after the run was cancelled is not delivered to the 
   );
   await gateway.shutdown();
 });
+
+test("the queue limit counts only queued runs, however many finished ones exist", async () => {
+  const { gateway, store, workspace } = testGateway({ maxQueued: 2, maxConcurrent: 1 });
+  store.put("session", {
+    id: "old",
+    workspaceId: workspace.id,
+    agent: "fake",
+    state: "closed",
+    nativeSessionId: null,
+    lastEventSeq: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    lastActivityAt: "2026-01-01T00:00:00.000Z",
+    keyId: null,
+  });
+  for (let i = 0; i < 300; i++)
+    store.put("run", {
+      id: `done${i}`,
+      sessionId: "old",
+      state: "succeeded",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      operationIds: [],
+    });
+  gateway.createRun({
+    workspace: "work",
+    agent: "fake",
+    prompt: script([{ hang: true }]),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  gateway.createRun({
+    workspace: "work",
+    agent: "fake",
+    prompt: script([{ text: "a" }]),
+  });
+  gateway.createRun({
+    workspace: "work",
+    agent: "fake",
+    prompt: script([{ text: "b" }]),
+  });
+  assert.throws(
+    () =>
+      gateway.createRun({
+        workspace: "work",
+        agent: "fake",
+        prompt: script([{ text: "c" }]),
+      }),
+    /QUEUE_FULL|Too many runs/,
+  );
+  assert.equal(gateway.listRuns().length, 303);
+  assert.deepEqual(gateway.listOperations({ state: "pending" }), []);
+  assert.equal(store.select("run", { state: "queued" }).length, 2);
+  await gateway.shutdown();
+});
