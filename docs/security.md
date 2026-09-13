@@ -95,8 +95,15 @@ is to be the point where that attempt is seen and can be refused.
   off without losing the login, so know it is there.
 - **It has no cost ceiling by default.** Set `run.maxBudgetUsd` in `config.json` to cap
   spend per Claude run; Codex reports tokens but offers no cap.
-- **It does not rate-limit authentication.** A wrong key is a cheap 401. Put a reverse
-  proxy with rate limiting in front of a public listener.
+- **It bounds what a caller can hold open, not how fast they may call.** A request must
+  arrive within 30 s; a connection idle for 60 s is closed; a key may hold twenty event
+  streams and twenty `wait=` responses at once; ten failed authentications from one
+  address within a minute lock that address out for the rest of it (429, `Retry-After`),
+  and every failure is logged with the address, the code and the route — never the key.
+  Forwarded addresses are believed only from a loopback peer, so a tunnel on this machine
+  reports its clients and a remote client cannot spoof one; behind a tunnel that forwards
+  nothing, all callers share one address and one lockout. For rate limiting proper, put a
+  reverse proxy in front of a public listener.
 - **It does not vet the agents.** Portrail trusts that Codex and Claude Code honour their
   own permission protocols. The checks at start are a mitigation, not a proof, and a new
   agent version can change behaviour — the live end-to-end tests exist to catch that.

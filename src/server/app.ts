@@ -5,6 +5,7 @@ import type { Gateway } from "../core/gateway.ts";
 import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
 import { obj, optNum, optStr, str } from "./body.ts";
+import { AuthGuard } from "./auth-guard.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
 import {
   digest,
@@ -17,6 +18,11 @@ import {
 import { TERMINAL_STATES, type AgentId } from "../types.ts";
 import { API_PREFIX, version } from "../runtime.ts";
 import { SessionEventPacer } from "./event-pacer.ts";
+
+/** Open event streams a key may hold at once. */
+const STREAMS_PER_KEY = 20;
+/** Held wait= responses a key may hold at once. */
+const WAITS_PER_KEY = 20;
 
 export interface ServerOptions {
   gateway: Gateway;
@@ -72,9 +78,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   const app = Fastify({
     logger: false,
     bodyLimit: 1024 * 1024,
-    requestTimeout: 0,
-    connectionTimeout: 0,
+    // A request must arrive within 30 s; a connection idle for 60 s is closed. Held
+    // responses stay alive because the event heartbeat and the wait keepalive both
+    // write every 15 s. A forwarded client address is believed only when the peer is
+    // loopback — a tunnel on this machine — so a remote client cannot claim one.
+    requestTimeout: 30_000,
+    connectionTimeout: 60_000,
     keepAliveTimeout: 65_000,
+    trustProxy: "loopback",
     ...(options.tls
       ? {
           https: {
@@ -85,7 +96,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       : {}),
   });
   const pacer = new SessionEventPacer();
+  // Every open event stream and every held wait= response listens on the gateway. The
+  // per-key caps below bound them; Node's default warning at ten would only be noise.
+  gateway.setMaxListeners(0);
   const streams = new Map<string, number>();
+  const waits = new Map<string, number>();
 
   // Clients routinely send Content-Type: application/json on a bodiless DELETE or
   // POST. Treat an empty body as an empty object instead of a 400.
@@ -106,18 +121,40 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   // ------------------------------------------------------------ plumbing
 
-  app.addHook("onRequest", async (_request, reply) => {
+  // Ten failed authentications from one address in a minute lock it out for the rest of it.
+  const guard = new AuthGuard();
+
+  app.addHook("onRequest", async (request, reply) => {
     reply.headers({
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
       "X-Portrail-Version": version,
     });
+    // A locked-out address is refused before anything is looked at. Liveness without a
+    // credential is still answered, so a monitor behind the same address keeps working.
+    const wait = guard.retryAfter(request.ip);
+    if (
+      wait > 0 &&
+      (request.routeOptions.url !== "/health" ||
+        request.headers.authorization !== undefined)
+    )
+      fail(
+        429,
+        "TOO_MANY_FAILURES",
+        `Too many failed authentications from this address. Try again in ${wait} s.`,
+        { retryAfterSeconds: wait },
+      );
   });
 
   app.setErrorHandler((error: any, request, reply) => {
-    if (error instanceof PortrailError)
+    if (error instanceof PortrailError) {
+      if (error.status === 401)
+        guard.failed(request.ip, error.code, request.method, request.url);
+      if (error.status === 429 && typeof error.details.retryAfterSeconds === "number")
+        reply.header("Retry-After", String(error.details.retryAfterSeconds));
       return reply.code(error.status).send(error.toJSON());
+    }
     const status =
       error.statusCode === 413
         ? 413
@@ -298,6 +335,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       "INVALID_REQUEST",
       "wait must be 0–3600 seconds.",
     );
+    // Checked before the run exists: a refusal after creating it would lose the 202.
+    if (wait)
+      ensure(
+        (waits.get(principal.keyId) ?? 0) < WAITS_PER_KEY,
+        429,
+        "TOO_MANY_WAITS",
+        `This key already holds ${WAITS_PER_KEY} wait= responses.`,
+      );
 
     // Validate before the idempotency lookup, so a malformed retry cannot replay a stored run.
     const callback = optStr(input, "callback");
@@ -330,22 +375,38 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     // leading whitespace is valid JSON — and always answer 200 with the state in
     // the body: a client cannot learn the outcome from a status code that had to
     // be chosen before the run ended.
+    // Hold a slot for as long as the response is held; a caller that leaves frees it.
+    waits.set(principal.keyId, (waits.get(principal.keyId) ?? 0) + 1);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      waits.set(principal.keyId, Math.max(0, (waits.get(principal.keyId) ?? 1) - 1));
+    };
+    const gone = new AbortController();
     reply.hijack();
+    reply.raw.on("close", () => {
+      gone.abort();
+      release();
+    });
     reply.raw.writeHead(200, {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
       "X-Portrail-Wait": "1",
     });
+    // Let the caller see the 200 now rather than with the first keepalive byte.
+    reply.raw.flushHeaders();
     const keepalive = setInterval(() => {
       if (!reply.raw.writableEnded) reply.raw.write("\n");
     }, 15_000);
     keepalive.unref();
     try {
-      await waitForRun(gateway, run.id, wait * 1000);
+      await waitForRun(gateway, run.id, wait * 1000, gone.signal);
     } finally {
       clearInterval(keepalive);
+      release();
     }
-    if (!reply.raw.writableEnded)
+    if (!reply.raw.writableEnded && !reply.raw.destroyed)
       reply.raw.end(JSON.stringify(runView(gateway.run(run.id))));
     return;
   });
@@ -483,10 +544,10 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       "Those events have been retained past their window. Fetch the run instead.",
     );
     ensure(
-      (streams.get(principal.keyId) ?? 0) < 20,
+      (streams.get(principal.keyId) ?? 0) < STREAMS_PER_KEY,
       429,
       "TOO_MANY_STREAMS",
-      "This key already has 20 open event streams.",
+      `This key already has ${STREAMS_PER_KEY} open event streams.`,
     );
     streams.set(principal.keyId, (streams.get(principal.keyId) ?? 0) + 1);
 
@@ -657,25 +718,29 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   return app;
 }
 
+/** Resolves when the run ends (true), the wait runs out (false) or the caller leaves (false). */
 function waitForRun(
   gateway: Gateway,
   runId: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (TERMINAL_STATES.has(gateway.run(runId).state)) return Promise.resolve(true);
+  if (signal?.aborted) return Promise.resolve(false);
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    const finish = (done: boolean) => {
+      clearTimeout(timer);
       gateway.off("event", onEvent);
-      resolve(false);
-    }, timeoutMs);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(done);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
     timer.unref();
     const onEvent = (event: PortrailEvent) => {
-      if (event.runId === runId && event.type === "run.completed") {
-        clearTimeout(timer);
-        gateway.off("event", onEvent);
-        resolve(true);
-      }
+      if (event.runId === runId && event.type === "run.completed") finish(true);
     };
+    const onAbort = () => finish(false);
     gateway.on("event", onEvent);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }

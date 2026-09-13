@@ -17,7 +17,8 @@ fields are type-checked: `prompt` must be a string; `session`, `workspace`, `age
 }
 ```
 
-`retryable: true` means trying again later can help (queue full, shutting down).
+`retryable: true` means trying again later can help (queue full, too many streams or held
+waits, a locked-out address, shutting down).
 
 ## Runs
 
@@ -41,7 +42,9 @@ the run as it stands when the run ends or the wait expires — check `state` in 
 not the status code. Send an
 `Idempotency-Key` header (8–200 characters) and a retry with the same key and body returns
 the same run **as it stands now**; a different body with the same key is a
-**409 `IDEMPOTENCY_CONFLICT`**. Only this route honours the header.
+**409 `IDEMPOTENCY_CONFLICT`**. Only this route honours the header. A key may hold twenty
+`wait=` responses at once (**429 `TOO_MANY_WAITS`** for the next); a caller that
+disconnects frees its slot.
 
 Run states: `queued` → `starting` → `running` ⇄ `waiting_for_approval` → `succeeded` |
 `failed` | `cancelled` | `outcome_unknown`. Also `cancelling` while a cancel is in flight.
@@ -98,7 +101,7 @@ Event types: `run.queued` `run.state_changed` `run.started` `run.steered` `run.c
 `files.changed` `diff` `usage` `warning`.
 
 A cursor behind the retention window gets **410 `EVENTS_EXPIRED`** — fetch the run instead.
-Twenty streams per key.
+Twenty streams per key (**429 `TOO_MANY_STREAMS`**).
 
 ### `POST /v1/runs/:id/cancel` `runs:write`
 
@@ -147,6 +150,11 @@ Scopes: `runs:write` `runs:read` `approvals:decide` `workspaces:admin` `policy:a
 
 `GET /health` — `{"status":"ok","version":"…"}` without a credential, for monitors. Send a
 key (any scope) or `X-Portrail-Local` to also get `agents` and `pro`; a wrong key is a 401.
+
+Ten wrong keys from one address within a minute answer **429 `TOO_MANY_FAILURES`** with a
+`Retry-After` header for the rest of the minute, on every route; `/health` without a
+credential is still answered. A request must arrive within 30 s and a connection idle for
+60 s is closed.
 
 ## Portrail Pro adds
 

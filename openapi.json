@@ -3,7 +3,7 @@
   "info": {
     "title": "Portrail",
     "version": "0.1.1",
-    "description": "An HTTP API in front of Codex and Claude Code running on your own machine. Every route under /v1 needs a bearer API key.",
+    "description": "An HTTP API in front of Codex and Claude Code running on your own machine. Every route under /v1 needs a bearer API key. Any route may answer 429 TOO_MANY_FAILURES with a Retry-After header after ten failed authentications from one address within a minute.",
     "license": {
       "name": "MIT"
     }
@@ -521,14 +521,7 @@
             }
           },
           "429": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
+            "description": "Queue full (QUEUE_FULL), twenty wait= responses already held by this key (TOO_MANY_WAITS), or too many failed authentications from this address (TOO_MANY_FAILURES; see Retry-After)."
           },
           "413": {
             "description": "metadata exceeds 16 KiB, or the body exceeds 1 MiB."
@@ -921,14 +914,7 @@
             }
           },
           "429": {
-            "description": "Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
+            "description": "Twenty streams already open for this key (TOO_MANY_STREAMS), or too many failed authentications from this address (TOO_MANY_FAILURES; see Retry-After)."
           },
           "401": {
             "description": "Error",
