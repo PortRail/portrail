@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { globToRegExp, parsePattern } from "../src/decide/match.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
 import { containOperation } from "../src/core/gateway.ts";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../src/config.ts";
@@ -368,4 +369,50 @@ test("sed may only print or filter: no writing, reading, executing, in-place edi
     assert.equal(decision.verdict, "deny", command);
     assert.match(decision.reason, /print or filter|No allow rule/, command);
   }
+});
+
+function searchable() {
+  const ws = realpathSync.native(mkdtempSync(join(tmpdir(), "portrail-search-")));
+  mkdirSync(join(ws, "src"));
+  mkdirSync(join(ws, "confidential"));
+  writeFileSync(join(ws, ".env"), "API_KEY=synthetic");
+  writeFileSync(join(ws, "src", "a.ts"), "");
+  writeFileSync(join(ws, "confidential", "plan.txt"), "synthetic");
+  return ws;
+}
+
+test("a search over a directory is judged by every file it can reach", async () => {
+  const ws = searchable();
+  const ctx = { ...context, workspaceRoot: ws };
+  const search = (dir: string): Operation => ({ ...base, kind: "read", recursive: true, paths: [dir] });
+  const defaults = new BuiltinDecider(DEFAULT_CONFIG.decide);
+
+  const whole = await defaults.decide(search(ws), ctx);
+  assert.equal(whole.verdict, "deny");
+  assert.equal(whole.rule, "read:.env*");
+  assert.match(whole.reason, /reaches \.env/);
+  assert.equal((await defaults.decide(search(join(ws, "src")), ctx)).verdict, "allow");
+
+  const narrow = new BuiltinDecider({ allow: ["read:src/**"], deny: [] });
+  assert.equal((await narrow.decide(search(ws), ctx)).verdict, "deny", "a reached file the allow list does not cover refuses the search");
+  assert.equal((await narrow.decide(search(join(ws, "src")), ctx)).verdict, "allow");
+
+  const capped = new BuiltinDecider(DEFAULT_CONFIG.decide, { reachLimit: 2 });
+  assert.match((await capped.decide(search(join(ws, "src")), ctx)).reason, /allowed/i);
+  assert.match((await capped.decide(search(ws), ctx)).reason, /too many files/);
+});
+
+test("a search that honours .gitignore does not reach what git ignores, and only git's word counts", async () => {
+  const ws = searchable();
+  const ctx = { ...context, workspaceRoot: ws };
+  const search: Operation = { ...base, kind: "read", recursive: true, paths: [ws] };
+  const defaults = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  assert.equal((await defaults.decide(search, ctx)).verdict, "deny", "no repository: nothing is ignored");
+
+  execFileSync("git", ["init", "-q"], { cwd: ws });
+  writeFileSync(join(ws, ".gitignore"), "node_modules\n");
+  assert.equal((await defaults.decide(search, ctx)).verdict, "deny", "a .gitignore that does not name .env changes nothing");
+
+  writeFileSync(join(ws, ".gitignore"), ".env\n");
+  assert.equal((await defaults.decide(search, ctx)).verdict, "allow", "the search tool skips what git ignores");
 });
