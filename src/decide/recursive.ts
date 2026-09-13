@@ -1,5 +1,6 @@
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import type { SearchFilter, SearchGlob } from "../types.ts";
 
 /** What a recursive search in a command can reach, and how the tool walks. */
 export interface RecursiveRead {
@@ -10,6 +11,50 @@ export interface RecursiveRead {
   follow: boolean;
   /** The tool skips what .gitignore names. */
   respectsIgnore: boolean;
+  /** The include and exclude filters the tool was given, when it was given any. */
+  filter?: SearchFilter;
+}
+
+/** rg's `-g`/`--glob`/`--iglob` and `-t`/`--type`, as the tool reads them. */
+function rgFilter(parsed: Parsed): SearchFilter | undefined {
+  const globs: SearchGlob[] = [];
+  const types: string[] = [];
+  let typesUsable = true;
+  for (const { flag, value } of parsed.values) {
+    if (flag === "-g" || flag === "--glob" || flag === "--iglob") {
+      const exclude = value.startsWith("!");
+      globs.push({
+        pattern: exclude ? value.slice(1) : value,
+        exclude,
+        dialect: "rg",
+        ...(flag === "--iglob" ? { ignoreCase: true } : {}),
+      });
+    } else if (flag === "-t" || flag === "--type") types.push(value);
+    // A custom, cleared or negated type is a list we do not know: narrow nothing by type.
+    else if (["-T", "--type-not", "--type-add", "--type-clear"].includes(flag))
+      typesUsable = false;
+  }
+  if (!globs.length && !types.length) return undefined;
+  return {
+    globs,
+    types: typesUsable ? types : [],
+    unmatched: globs.some((glob) => !glob.exclude) ? "drop" : "keep",
+  };
+}
+
+/** grep's `--include`, `--exclude` and `--exclude-dir`. Unmatched files are kept unless the first filter was an include. */
+function grepFilter(parsed: Parsed): SearchFilter | undefined {
+  const globs: SearchGlob[] = [];
+  for (const { flag, value } of parsed.values) {
+    if (flag === "--include")
+      globs.push({ pattern: value, exclude: false, dialect: "grep" });
+    else if (flag === "--exclude")
+      globs.push({ pattern: value, exclude: true, dialect: "grep" });
+    else if (flag === "--exclude-dir")
+      globs.push({ pattern: value, exclude: true, dialect: "grep-dir" });
+  }
+  if (!globs.length) return undefined;
+  return { globs, types: [], unmatched: globs[0]!.exclude ? "keep" : "drop" };
 }
 
 /** rg options that take a value, so the value is not mistaken for a path. */
@@ -118,6 +163,8 @@ interface Parsed {
   operands: string[];
   shortFlags: string;
   longFlags: string[];
+  /** Every flag that took a value, in order, with the value it took. */
+  values: Array<{ flag: string; value: string }>;
   /** The pattern came through `-e`/`--regexp`, so every operand is a path. */
   patternGiven: boolean;
 }
@@ -128,6 +175,7 @@ function parseFlags(words: readonly string[], valueFlags: Set<string>): Parsed {
     operands: [],
     shortFlags: "",
     longFlags: [],
+    values: [],
     patternGiven: false,
   };
   for (let index = 1; index < words.length; index++) {
@@ -141,7 +189,10 @@ function parseFlags(words: readonly string[], valueFlags: Set<string>): Parsed {
       const name = equals >= 0 ? word.slice(0, equals) : word;
       parsed.longFlags.push(name);
       if (name === "--regexp") parsed.patternGiven = true;
-      if (equals < 0 && valueFlags.has(name)) index++;
+      if (valueFlags.has(name)) {
+        const value = equals >= 0 ? word.slice(equals + 1) : (words[++index] ?? "");
+        parsed.values.push({ flag: name, value });
+      }
       continue;
     }
     if (word.startsWith("-") && word.length > 1) {
@@ -151,7 +202,9 @@ function parseFlags(words: readonly string[], valueFlags: Set<string>): Parsed {
         if (letter === "e") parsed.patternGiven = true;
         if (valueFlags.has(`-${letter}`)) {
           // The value is the rest of this word, or the next word.
-          if (at === word.length - 1) index++;
+          const value =
+            at < word.length - 1 ? word.slice(at + 1) : (words[++index] ?? "");
+          parsed.values.push({ flag: `-${letter}`, value });
           break;
         }
       }
@@ -206,6 +259,7 @@ export function recursiveReadOf(
       respectsIgnore:
         unrestricted === 0 &&
         !parsed.longFlags.some((flag) => flag.startsWith("--no-ignore")),
+      ...(rgFilter(parsed) ? { filter: rgFilter(parsed) } : {}),
     };
   }
   if (program === "grep") {
@@ -224,6 +278,7 @@ export function recursiveReadOf(
         parsed.shortFlags.includes("R") ||
         parsed.longFlags.includes("--dereference-recursive"),
       respectsIgnore: false,
+      ...(grepFilter(parsed) ? { filter: grepFilter(parsed) } : {}),
     };
   }
   if (program === "diff") {

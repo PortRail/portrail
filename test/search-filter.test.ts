@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compileFilter, expandBraces, type Candidate } from "../src/decide/filter.ts";
 import type { SearchFilter, SearchGlob } from "../src/types.ts";
+import { recursiveReadOf } from "../src/decide/recursive.ts";
+import { shellSplit } from "../src/providers/codex/shell.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("brace alternatives expand before matching, nested ones too, and unbalanced braces are refused", () => {
   assert.deepEqual(expandBraces("*.{ts,tsx}"), ["*.ts", "*.tsx"]);
@@ -191,4 +196,60 @@ test("a pattern Portrail cannot read disables narrowing when it includes, and is
     "the unreadable exclude is dropped, the include still applies",
   );
   assert.equal(keeps(filter([rg("!*.[ch]")]), file("x.c")), true);
+});
+
+test("a search command's filter flags are recorded in order, with their dialect", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "portrail-flags-"));
+  const read = (command: string) => recursiveReadOf(shellSplit(command), cwd);
+
+  const rgFilter = read("rg -g '*.ts' --iglob '!Fixtures' -t ts foo .")!.filter!;
+  assert.deepEqual(rgFilter.globs, [
+    { pattern: "*.ts", exclude: false, dialect: "rg" },
+    { pattern: "Fixtures", exclude: true, dialect: "rg", ignoreCase: true },
+  ]);
+  assert.deepEqual(rgFilter.types, ["ts"]);
+  assert.equal(rgFilter.unmatched, "drop");
+  assert.deepEqual(
+    read("rg -g*.ts foo")!.filter!.globs,
+    [{ pattern: "*.ts", exclude: false, dialect: "rg" }],
+    "an attached value",
+  );
+  assert.deepEqual(
+    read("rg --glob=*.ts foo")!.filter!.globs,
+    [{ pattern: "*.ts", exclude: false, dialect: "rg" }],
+    "an = value",
+  );
+  assert.equal(
+    read("rg -g '!.env' foo")!.filter!.unmatched,
+    "keep",
+    "only excludes: unmatched files are still opened",
+  );
+  assert.deepEqual(
+    read("rg --type-add 'x:*.env' -t x foo")!.filter!.types,
+    [],
+    "a custom type narrows nothing",
+  );
+  assert.deepEqual(
+    read("rg -T ts foo")!.filter?.types ?? [],
+    [],
+    "a negated type narrows nothing either",
+  );
+
+  const grepDrop = read("grep -r --include='*.ts' --exclude=.env KEY .")!.filter!;
+  assert.deepEqual(grepDrop.globs, [
+    { pattern: "*.ts", exclude: false, dialect: "grep" },
+    { pattern: ".env", exclude: true, dialect: "grep" },
+  ]);
+  assert.equal(grepDrop.unmatched, "drop");
+  assert.equal(
+    read("grep -r --exclude=.env --include='*.ts' KEY .")!.filter!.unmatched,
+    "keep",
+    "grep keeps unmatched files when the first filter excludes",
+  );
+  assert.deepEqual(read("grep -r --exclude-dir=confidential KEY .")!.filter!.globs, [
+    { pattern: "confidential", exclude: true, dialect: "grep-dir" },
+  ]);
+
+  assert.equal(read("rg foo src")!.filter, undefined, "no filter flags, no filter");
+  assert.equal(read("diff -r a b")!.filter, undefined);
 });
