@@ -11,6 +11,7 @@ import type {
 } from "../types.ts";
 import type { Decision } from "../../types.ts";
 import { GOVERNED_TOOLS, toolToOperation } from "./tools.ts";
+import { SANDBOX_DENY_GLOBS } from "../../core/protected.ts";
 
 export interface ClaudeProviderOptions {
   /** Use an installed `claude` binary instead of the SDK's bundled one. */
@@ -29,14 +30,9 @@ export interface ClaudeProviderOptions {
 /**
  * Files no run may read even inside the workspace: secrets, and the agents' own
  * configuration and credentials — including Portrail's data directory, which holds
- * the token that answers parked operations.
+ * the token that answers parked operations. The same list the gateway protects.
  */
-const SANDBOX_DENY_READ = [
-  "**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*",
-  "**/.ssh/**", "**/.aws/**", "**/.gnupg/**", "**/.kube/**", "**/.docker/config.json",
-  "**/.netrc", "**/.npmrc", "**/.pypirc", "**/.gitconfig",
-  "**/.codex/**", "**/.claude/**", "**/.config/claude*/**", "**/.portrail/**",
-];
+const SANDBOX_DENY_READ = [...SANDBOX_DENY_GLOBS];
 
 /** An hour: approvals wait on people, and the SDK's hook timeout is in seconds. */
 const HOOK_TIMEOUT_SECONDS = 3600;

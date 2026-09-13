@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalPath, containOperation, refuseWorkspaceRoot } from "../src/core/gateway.ts";
+import { canonicalPath, containOperation, protectedPaths, refuseWorkspaceRoot } from "../src/core/gateway.ts";
 import { globToRegExp } from "../src/decide/match.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
@@ -76,6 +76,18 @@ test("home, root, and anything holding Portrail's own data cannot be a workspace
   const withDot = realTmp("dot-");
   mkdirSync(join(withDot, ".portrail"));
   assert.match(refuseWorkspaceRoot(withDot) ?? "", /\.portrail/);
+});
+
+test("credential stores, tool logins and shell history are protected everywhere", () => {
+  const home = homedir();
+  const list = protectedPaths();
+  for (const entry of [".claude.json", ".zsh_history", ".bash_history", ".config/gh", ".config/gcloud", ".azure", ".git-credentials", ".gitconfig"])
+    assert.ok(list.some((p) => p.endsWith("/" + entry)), `${entry} is protected`);
+  const root = realTmp("ws-");
+  const exec = (command: string) => containOperation({ ...base, kind: "exec", command, cwd: root }, root).refused ?? "";
+  assert.match(exec("cat ~/.claude.json"), /protected everywhere/);
+  assert.match(exec(`tail -50 ${join(home, ".zsh_history")}`), /protected everywhere/);
+  assert.match(exec("cat ~/.config/gh/hosts.yml"), /protected everywhere/);
 });
 
 test("even inside an enrolled workspace, the agent's own config and secrets are off limits", () => {

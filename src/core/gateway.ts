@@ -15,6 +15,7 @@ import {
   type Workspace,
 } from "../types.ts";
 import { commandWords } from "../decide/builtin.ts";
+import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
 import { DeltaBatcher } from "./delta-batcher.ts";
 import { ParkingLot } from "./parking.ts";
 import type { OperationRecord, RunRecord, SessionRecord } from "./records.ts";
@@ -835,14 +836,10 @@ export function canonicalPath(root: string, declared: string): string {
   throw new Error("Too many symlink hops.");
 }
 
-/** Places no agent may ever touch, whatever workspace it is in. */
+/** Places no agent may ever touch, whatever workspace it is in, as absolute paths. */
 export function protectedPaths(dataDir?: string): string[] {
   const home = homedir();
-  const paths = [
-    ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".codex", ".claude", ".config/claude", ".config/claude-code",
-    ".netrc", ".npmrc", ".pypirc", ".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile",
-    ".portrail",
-  ].map((entry) => join(home, entry));
+  const paths = PROTECTED_HOME_ENTRIES.map((entry) => join(home, entry.path));
   if (dataDir) paths.push(dataDir);
   return paths.map((path) => {
     try {

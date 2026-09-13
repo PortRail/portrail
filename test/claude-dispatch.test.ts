@@ -150,7 +150,7 @@ test("the PreToolUse hook is the gate — every tool call is decided by the gate
   assert.equal(options.sandbox.enabled, true);
   assert.equal(options.sandbox.failIfUnavailable, true, "no sandbox means no run, unless the operator opts out");
   assert.equal(typeof options.stderr, "function", "a degraded sandbox is surfaced, not swallowed");
-  for (const secret of ["**/.codex/**", "**/.claude/**", "**/.portrail/**", "**/.ssh/**"]) assert.ok(options.sandbox.filesystem.denyRead.includes(secret), secret);
+  for (const secret of ["**/.codex/**", "**/.claude/**", "**/.claude.json", "**/.portrail/**", "**/.ssh/**", "**/.envrc", "**/.config/gh/**", "**/.zsh_history"]) assert.ok(options.sandbox.filesystem.denyRead.includes(secret), secret);
   assert.equal(options.sandbox.autoAllowBashIfSandboxed, false);
   assert.equal(options.sandbox.allowUnsandboxedCommands, false);
   assert.deepEqual(options.sandbox.filesystem.allowWrite, [h.root]);
