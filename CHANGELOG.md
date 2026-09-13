@@ -13,6 +13,12 @@ All notable changes to Portrail are recorded here. The format follows
   the tool does (last matching glob wins, slashless globs match at any depth, slashed
   globs anchor to the working directory) and falls back to judging the whole directory
   when it cannot be sure.
+- The listener bounds what a caller can hold open: a request must arrive within 30 s, a
+  connection idle for 60 s is closed, a key may hold twenty `wait=` responses at once
+  (`TOO_MANY_WAITS`) and a caller that disconnects frees its slot. Ten failed
+  authentications from one address within a minute lock that address out for the rest of
+  it (`TOO_MANY_FAILURES`, `Retry-After`); every failure is logged with the address, the
+  code and the route. Forwarded addresses are believed only from a loopback peer.
 
 ## [0.1.1] — 2026-09-13
 
