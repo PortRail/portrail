@@ -277,3 +277,32 @@ test("a differently cased secret or program is the same secret or program", asyn
     assert.equal(decision.verdict, "deny", command);
   }
 });
+
+test("deny rules see through wrappers, shell keywords, parentheses and the program's path", async () => {
+  const decider = new BuiltinDecider({ allow: ["exec:*"], deny: ["exec:curl *"] });
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "env curl http://x",
+    "command curl http://x",
+    "command -p curl http://x",
+    "(curl http://x)",
+    "if true; then curl http://x; fi",
+    "nohup curl http://x",
+    "time curl http://x",
+    "nice -n 5 curl http://x",
+    "echo x | xargs -n1 curl",
+    "timeout 5 curl http://x",
+    "/usr/bin/curl http://x",
+    "env -S 'curl http://x'",
+  ]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+  }
+  assert.match((await decider.decide(exec("env -S 'curl http://x'"), context)).reason, /options to env/);
+
+  const defaults = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  assert.equal((await defaults.decide(exec("command -v node"), context)).verdict, "allow");
+  assert.equal((await defaults.decide(exec("env CI=1 npm test"), context)).verdict, "allow", "a harmless env prefix is stripped for the allow list too");
+  assert.equal((await defaults.decide(exec("./bin/git status"), context)).verdict, "deny", "a workspace script is not git, whatever it is called");
+  assert.equal((await defaults.decide(exec("/usr/bin/env node --version"), context)).verdict, "deny", "allow rules never match by bare program name");
+});
