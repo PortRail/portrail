@@ -717,3 +717,12 @@ test("/health is liveness only without a credential; a key or the local token al
   await app.close();
   await ctx.gateway.shutdown();
 });
+
+test("a request must arrive within 30 s and an idle connection is closed after 60 s", async () => {
+  const s = await serverWithKey();
+  await s.app.ready();
+  assert.equal(s.app.server.requestTimeout, 30_000);
+  assert.equal(s.app.server.timeout, 60_000);
+  assert.equal(s.app.server.keepAliveTimeout, 65_000);
+  await s.close();
+});

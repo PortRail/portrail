@@ -72,9 +72,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   const app = Fastify({
     logger: false,
     bodyLimit: 1024 * 1024,
-    requestTimeout: 0,
-    connectionTimeout: 0,
+    // A request must arrive within 30 s; a connection idle for 60 s is closed. Held
+    // responses stay alive because the event heartbeat and the wait keepalive both
+    // write every 15 s. A forwarded client address is believed only when the peer is
+    // loopback — a tunnel on this machine — so a remote client cannot claim one.
+    requestTimeout: 30_000,
+    connectionTimeout: 60_000,
     keepAliveTimeout: 65_000,
+    trustProxy: "loopback",
     ...(options.tls
       ? {
           https: {
