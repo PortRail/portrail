@@ -648,3 +648,9 @@ test("a search that honours .gitignore does not reach what git ignores, and only
     "the search tool skips what git ignores",
   );
 });
+
+test("a glob can be compiled case-sensitively when the tool that owns it is", () => {
+  assert.ok(!globToRegExp(".ENV", true, { ignoreCase: false }).test(".env"));
+  assert.ok(globToRegExp(".ENV", true).test(".env"), "rules stay case-insensitive");
+  assert.ok(globToRegExp("*.TS", false, { ignoreCase: true }).test("a.ts"));
+});
