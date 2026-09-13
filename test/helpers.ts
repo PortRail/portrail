@@ -13,7 +13,7 @@ import type { PortrailEvent } from "../src/store/index.ts";
 export const script = (steps: unknown[]) => JSON.stringify(steps);
 
 export function testGateway(
-  overrides: Partial<GatewayOptions> & { decider?: Decider; store?: Store } = {},
+  overrides: Partial<GatewayOptions> & { decider?: Decider; store?: Store; providers?: Map<AgentId, Provider> } = {},
 ) {
   const store = overrides.store ?? new Store(":memory:");
   const decider =
@@ -22,7 +22,7 @@ export function testGateway(
       allow: ["read:**", "write:**", "exec:npm test*", "exec:ls*"],
       deny: ["write:.env*", "exec:rm -rf*", "net:*"],
     });
-  const providers = new Map<AgentId, Provider>([["fake", new FakeProvider()]]);
+  const providers = overrides.providers ?? new Map<AgentId, Provider>([["fake", new FakeProvider()]]);
   const gateway = new Gateway(store, providers, decider, {
     maxConcurrent: overrides.maxConcurrent ?? 2,
     defaultMaxSeconds: overrides.defaultMaxSeconds ?? 60,

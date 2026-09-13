@@ -528,7 +528,9 @@ export class Gateway extends EventEmitter {
       }
       const outcome = await handle.done;
       batcher.flush();
-      this.finish(run.id, outcome.state, output.trim() || outcome.summary);
+      // When the provider lost the agent, its account of that is the summary: partial
+      // output would read like a result.
+      this.finish(run.id, outcome.state, outcome.state === "outcome_unknown" ? outcome.summary : output.trim() || outcome.summary);
     } catch (error) {
       batcher.flush();
       const message = (error as Error).message ?? "The agent failed.";
