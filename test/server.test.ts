@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { request as httpRequest } from "node:http";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -888,4 +889,98 @@ test("a forwarded address is believed from a loopback peer only", async () => {
     console.error = original;
     await s.close();
   }
+});
+
+test("a key may hold twenty wait= responses at once; the twenty-first is refused", async () => {
+  const s = await serverWithKey();
+  const payload = {
+    agent: "fake",
+    workspace: "work",
+    prompt: script([{ hang: true }]),
+    wait: 30,
+  };
+  const headers = { ...s.headers, "idempotency-key": "same-hanging-run" };
+  const held = Array.from({ length: 20 }, () =>
+    s.app.inject({ method: "POST", url: "/v1/runs", headers, payload }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const refused = await s.app.inject({
+    method: "POST",
+    url: "/v1/runs",
+    headers,
+    payload,
+  });
+  assert.equal(refused.statusCode, 429);
+  assert.equal(refused.json().error.code, "TOO_MANY_WAITS");
+  const run = s.gateway.listRuns()[0]!;
+  await s.gateway.cancel(run.id);
+  const answers = await Promise.all(held);
+  assert.ok(
+    answers.every(
+      (answer) => answer.statusCode === 200 && answer.json().state === "cancelled",
+    ),
+  );
+  await s.close();
+});
+
+test("a caller that disconnects while waiting frees its slot and its listener", async () => {
+  const s = await serverWithKey();
+  await s.app.listen({ host: "127.0.0.1", port: 0 });
+  const port = (s.app.server.address() as { port: number }).port;
+  const baseline = s.gateway.listenerCount("event");
+  const body = JSON.stringify({
+    agent: "fake",
+    workspace: "work",
+    prompt: script([{ hang: true }]),
+    wait: 30,
+  });
+  await new Promise<void>((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/v1/runs",
+        headers: { ...s.headers, "content-length": Buffer.byteLength(body) },
+      },
+      (response) => {
+        assert.equal(
+          response.statusCode,
+          200,
+          "the held response is announced at once",
+        );
+        response.on("error", () => {});
+        req.destroy();
+        resolve();
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+  for (let i = 0; i < 100 && s.gateway.listenerCount("event") !== baseline; i++)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(
+    s.gateway.listenerCount("event"),
+    baseline,
+    "the wait listener is gone once the caller left",
+  );
+  // The slot is free again: twenty more holders of another hanging run fit, none is refused.
+  const headers = { ...s.headers, "idempotency-key": "after-disconnect" };
+  const payload = {
+    agent: "fake",
+    workspace: "work",
+    prompt: script([{ hang: true }]),
+    wait: 30,
+  };
+  const held = Array.from({ length: 20 }, () =>
+    s.app.inject({ method: "POST", url: "/v1/runs", headers, payload }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (const run of s.gateway.listRuns()) await s.gateway.cancel(run.id);
+  const answers = await Promise.all(held);
+  assert.ok(
+    answers.every((answer) => answer.statusCode === 200),
+    `the freed slot leaves room for twenty holders: ${answers.map((a) => a.statusCode).join(",")}`,
+  );
+  await s.close();
 });
