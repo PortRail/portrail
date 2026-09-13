@@ -1,10 +1,20 @@
 # API reference
 
 Base URL: `http://127.0.0.1:7431` by default. Every route under `/v1` needs
-`Authorization: Bearer prt_…`. Bodies are JSON. Errors look like:
+`Authorization: Bearer prt_…` (the scheme is case-insensitive), except the two local-answer
+routes described below, which take `X-Portrail-Local`. Bodies are JSON objects and their
+fields are type-checked: `prompt` must be a string; `session`, `workspace`, `agent`,
+`model` and `callback` strings when present; `maxSeconds` a number from 30 to 14400;
+`metadata` an object of at most 16 KiB (**413** otherwise). Errors look like:
 
 ```json
-{ "error": { "code": "FORBIDDEN", "message": "This key does not have the runs:write scope.", "retryable": false } }
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "This key does not have the runs:write scope.",
+    "retryable": false
+  }
+}
 ```
 
 `retryable: true` means trying again later can help (queue full, shutting down).
@@ -15,13 +25,13 @@ Base URL: `http://127.0.0.1:7431` by default. Every route under `/v1` needs
 
 ```json
 {
-  "agent": "codex",            // or "claude"; omit "session" to start a new one
-  "workspace": "my-app",       // name or id
+  "agent": "codex", // or "claude"; omit "session" to start a new one
+  "workspace": "my-app", // name or id
   "prompt": "Fix the failing test",
-  "session": "ses_…",          // optional: continue an earlier conversation instead
-  "model": "gpt-5.6-sol",      // optional: must be one the agent offers
-  "maxSeconds": 900,           // optional: 30–14400
-  "wait": 300                  // optional: hold the response up to this many seconds
+  "session": "ses_…", // optional: continue an earlier conversation instead
+  "model": "gpt-5.6-sol", // optional: must be one the agent offers
+  "maxSeconds": 900, // optional: 30–14400
+  "wait": 300 // optional: hold the response up to this many seconds
 }
 ```
 
@@ -30,13 +40,15 @@ held, whitespace is sent every 15 s so proxies keep it open, and the answer is *
 the run as it stands when the run ends or the wait expires — check `state` in the body,
 not the status code. Send an
 `Idempotency-Key` header (8–200 characters) and a retry with the same key and body returns
-the same run; a different body with the same key is a **409 `IDEMPOTENCY_CONFLICT`**.
+the same run **as it stands now**; a different body with the same key is a
+**409 `IDEMPOTENCY_CONFLICT`**. Only this route honours the header.
 
 Run states: `queued` → `starting` → `running` ⇄ `waiting_for_approval` → `succeeded` |
 `failed` | `cancelled` | `outcome_unknown`. Also `cancelling` while a cancel is in flight.
 
-`outcome_unknown` means Portrail lost track of the agent after handing it the work. Part of
-the work may have happened. Nothing is retried automatically; the session is marked
+`outcome_unknown` means Portrail lost track of the agent after handing it the work — the
+agent's process exited, its stream broke, or Portrail itself restarted. Part of the work
+may have happened. Nothing is retried automatically; the session is marked
 `attention_required` and refuses new runs until you start a fresh one.
 
 Every run carries `operations: { total, allowed, denied, asked }`. A `succeeded` run with
@@ -75,12 +87,14 @@ data: {"schemaVersion":"1.0.0","sessionId":"ses_…","runId":"run_…","seq":7,"
 ```
 
 Resume with `Last-Event-ID: 7` or `?after=7`. Every event has a sequence number; you will
-never miss one or see one twice. The stream ends after `run.completed`. `?all=true` also
-includes other runs in the same session.
+never miss one or see one twice. The stream always ends with the run's own
+`run.completed`. Delivery is paced at 100 events per second per session, so a long
+replay takes a moment rather than being cut short. `?all=true` also includes other runs
+in the same session.
 
 Event types: `run.queued` `run.state_changed` `run.started` `run.steered` `run.completed`
 `output.text` `output.reasoning` `operation.requested` `operation.decided`
-`approval.requested` (Pro) `command.started` `command.output` `command.finished`
+`approval.requested` `command.started` `command.output` `command.finished`
 `files.changed` `diff` `usage` `warning`.
 
 A cursor behind the retention window gets **410 `EVENTS_EXPIRED`** — fetch the run instead.

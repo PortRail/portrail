@@ -30,9 +30,13 @@ Keep the laptop awake: `caffeinate -s` while it runs, or turn off sleep on power
 
 ```json
 // ~/.portrail/config.json
-{ "listen": { "host": "0.0.0.0", "port": 7431 },
-  "tls": { "cert": "/etc/letsencrypt/live/box.example.com/fullchain.pem",
-           "key":  "/etc/letsencrypt/live/box.example.com/privkey.pem" } }
+{
+  "listen": { "host": "0.0.0.0", "port": 7431 },
+  "tls": {
+    "cert": "/etc/letsencrypt/live/box.example.com/fullchain.pem",
+    "key": "/etc/letsencrypt/live/box.example.com/privkey.pem"
+  }
+}
 ```
 
 Or keep Portrail on loopback and put Caddy or nginx in front:
@@ -67,7 +71,7 @@ logout.
 3. Headers: `Authorization: Bearer prt_…` and `Content-Type: application/json`.
 4. Body type: Raw, JSON:
    ```json
-   {"agent":"codex","workspace":"my-app","prompt":"{{1.text}}","wait":40}
+   { "agent": "codex", "workspace": "my-app", "prompt": "{{1.text}}", "wait": 40 }
    ```
    `wait: 40` keeps the response inside Make's request timeout. Most runs take longer
    than that, so:

