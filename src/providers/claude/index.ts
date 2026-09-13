@@ -194,6 +194,12 @@ class ClaudeRun implements ProviderHandle {
   private stream: ReturnType<Sdk["query"]> | null = null;
   private sessionId: string | null = null;
   private finished = false;
+  private started = false;
+
+  /** How a run ends when the stream ends without a verdict: unknown once the agent had the work. */
+  private lost(): RunOutcome["state"] {
+    return this.context.signal.aborted ? "cancelled" : this.started ? "outcome_unknown" : "failed";
+  }
   private resolveDone!: (outcome: RunOutcome) => void;
   readonly done: Promise<RunOutcome>;
 
@@ -371,20 +377,13 @@ class ClaudeRun implements ProviderHandle {
         }
       }
     } catch (error) {
-      if (!this.finished)
-        this.finish(
-          context.signal.aborted ? "cancelled" : "failed",
-          (error as Error).message ?? "Claude Code failed.",
-        );
+      if (!this.finished) this.finish(this.lost(), (error as Error).message ?? "Claude Code failed.");
       return;
     }
 
     if (this.finished) return;
     if (!result) {
-      this.finish(
-        context.signal.aborted ? "cancelled" : "failed",
-        "Claude Code ended without a result.",
-      );
+      this.finish(this.lost(), "Claude Code ended without a result.");
       return;
     }
 
@@ -429,6 +428,7 @@ class ClaudeRun implements ProviderHandle {
       return;
     }
     context.emit({ type: "started", nativeSessionId: this.sessionId });
+    this.started = true;
   }
 
   private onToolResult(block: any, message: any) {

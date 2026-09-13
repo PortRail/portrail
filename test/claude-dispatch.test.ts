@@ -38,7 +38,9 @@ function fakeSdk(script: (captured: Captured, emit: (message: any) => void) => P
       async *[Symbol.asyncIterator]() {
         for (;;) {
           if (queue.length) {
-            yield queue.shift();
+            const next = queue.shift();
+            if (next instanceof Error) throw next;
+            yield next;
             continue;
           }
           if (ended) return;
@@ -219,4 +221,26 @@ test("the operator's read denies are enforced by the sandbox as well, translated
   assert.ok(denyRead.includes("**/*.key"), "a rule that already matches anywhere stays as it is");
   assert.ok(denyRead.includes(join(root, ".secrets")));
   assert.ok(denyRead.includes("**/.env"), "the built-in list is still there");
+});
+
+test("losing the Claude stream after the agent started leaves the outcome unknown; before it, a plain failure", async () => {
+  const outcomeOf = async (sdk: ReturnType<typeof fakeSdk>) => {
+    const h = harness(sdk, () => ({ verdict: "allow", reason: "" }));
+    return (await (await h.provider.start(h.context)).done).state;
+  };
+  const lostAfterInit = fakeSdk(async (_captured, emit) => {
+    emit(init());
+    emit(new Error("process exited unexpectedly"));
+  });
+  assert.equal(await outcomeOf(lostAfterInit), "outcome_unknown");
+
+  const silentAfterInit = fakeSdk(async (_captured, emit) => {
+    emit(init());
+  });
+  assert.equal(await outcomeOf(silentAfterInit), "outcome_unknown", "a stream that ends without a result after the agent started");
+
+  const lostBeforeInit = fakeSdk(async (_captured, emit) => {
+    emit(new Error("spawn failed"));
+  });
+  assert.equal(await outcomeOf(lostBeforeInit), "failed", "nothing had started, so nothing is unknown");
 });

@@ -231,6 +231,7 @@ class CodexRun implements ProviderHandle {
   private threadId: string | null = null;
   private turnId: string | null = null;
   private finished = false;
+  private started = false;
   private resolveDone!: (outcome: RunOutcome) => void;
   readonly done: Promise<RunOutcome>;
 
@@ -259,10 +260,9 @@ class CodexRun implements ProviderHandle {
     this.rpc = new CodexRpc({ executable: this.executable, ...this.spawn });
     const rpc = this.rpc;
 
-    rpc.on("fault", (error: Error) => this.finish("failed", error.message));
+    rpc.on("fault", (error: Error) => this.lostContact(error.message));
     rpc.on("exit", () => {
-      if (!this.finished)
-        this.finish("failed", "Codex exited before the run completed.");
+      if (!this.finished) this.lostContact("Codex exited before the run completed.");
     });
     rpc.on("notification", (message: RpcMessage) => this.onNotification(message));
     rpc.on("request", (message: RpcMessage) => void this.onRequest(message));
@@ -345,6 +345,7 @@ class CodexRun implements ProviderHandle {
       );
 
     context.emit({ type: "started", nativeSessionId: this.threadId });
+    this.started = true;
 
     if (context.signal.aborted) {
       this.finish("cancelled", "Cancelled before the agent started.");
@@ -623,6 +624,17 @@ class CodexRun implements ProviderHandle {
       status === "completed" ? "succeeded" : status === "interrupted" ? "cancelled" : "failed",
       summary,
     );
+  }
+
+  /**
+   * The process is gone or the protocol broke. Before the turn began nothing happened,
+   * so that is a plain failure; after it, the agent may have done anything, and the
+   * honest answer is that we do not know.
+   */
+  private lostContact(message: string) {
+    if (this.finished) return;
+    if (this.context.signal.aborted) return this.finish("cancelled", message);
+    this.finish(this.started ? "outcome_unknown" : "failed", message);
   }
 
   private finish(state: RunOutcome["state"], summary: string) {
