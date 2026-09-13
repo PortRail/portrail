@@ -272,8 +272,9 @@ export async function run(args: ParsedArgs): Promise<number> {
   });
   if (json) {
     for await (const event of client.runs.events(created.id)) console.log(JSON.stringify(event));
-    console.log(JSON.stringify(await client.runs.get(created.id), null, 2));
-    return 0;
+    const final = await client.runs.get(created.id);
+    console.log(JSON.stringify(final, null, 2));
+    return exitCodeFor(final);
   }
 
   process.stderr.write(`run ${created.id} on ${workspaceName}\n`);
@@ -319,8 +320,13 @@ export async function run(args: ParsedArgs): Promise<number> {
   const final = await client.runs.get(created.id);
   const denied = final.operations?.denied ?? 0;
   if (denied) process.stderr.write(`${denied} operation${denied === 1 ? " was" : "s were"} refused by your rules (exit 2).\n`);
-  // 0: did everything asked. 2: finished, but something was refused. 1: did not finish.
-  return final.state !== "succeeded" ? 1 : denied ? 2 : 0;
+  return exitCodeFor(final);
+}
+
+/** 0: did everything asked. 2: finished, but something was refused. 1: did not finish. Same in every output mode. */
+export function exitCodeFor(run: { state: string; operations?: { denied?: number } | null }): 0 | 1 | 2 {
+  if (run.state !== "succeeded") return 1;
+  return (run.operations?.denied ?? 0) > 0 ? 2 : 0;
 }
 
 
