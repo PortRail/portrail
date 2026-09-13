@@ -1,13 +1,15 @@
 import { basename, relative, resolve, sep } from "node:path";
 import type { Decider, DecisionContext } from "../extension.ts";
-import type { Decision, Operation } from "../types.ts";
+import type { Decision, Operation, SearchFilter } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
 import { sedObjection } from "./sed.ts";
 import { gitIgnored } from "./ignored.ts";
+import { compileFilter, type Candidate } from "./filter.ts";
+import { isWithin } from "../core/paths.ts";
 import { recursiveReadOf } from "./recursive.ts";
 import { REACH_LIMIT, reachableFiles } from "../core/reach.ts";
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 
 /** One segment of a command line, in the forms a rule may be matched against. */
 export interface CommandSegment {
@@ -341,6 +343,38 @@ function leadingAssignment(segment: string): { rest: string; refused: string | n
 }
 
 /** The values a rule is matched against, per operation kind. */
+/**
+ * A reached file described the way a search tool's globs see it: its name, its path
+ * from the tool's working directory, and the directories between the search root and
+ * it (which an excluded directory name prunes).
+ */
+function candidate(file: string, searchRoot: string, cwd: string): Candidate {
+  const realRoot = safeReal(searchRoot);
+  const realCwd = safeReal(cwd);
+  const fromCwd = isWithin(file, realCwd)
+    ? relative(realCwd, file).split(sep).join("/")
+    : null;
+  const between = isWithin(file, realRoot)
+    ? relative(realRoot, file).split(sep)
+    : [basename(file)];
+  // The search root may itself sit below the working directory: those leading parts belong to every dir's path.
+  const fromCwdParts = fromCwd?.split("/") ?? [];
+  const lead = fromCwdParts.length - between.length;
+  const dirs = between.slice(0, -1).map((name, index) => ({
+    name,
+    rel: fromCwd === null ? null : fromCwdParts.slice(0, lead + index + 1).join("/"),
+  }));
+  return { name: basename(file), fromCwd, dirs };
+}
+
+function safeReal(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
 function isDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
@@ -484,7 +518,13 @@ export class BuiltinDecider implements Decider {
    */
   private async reach(
     dirs: readonly string[],
-    search: { hidden: boolean; follow: boolean; respectsIgnore: boolean },
+    search: {
+      hidden: boolean;
+      follow: boolean;
+      respectsIgnore: boolean;
+      filter?: SearchFilter;
+      cwd: string;
+    },
     root: string,
   ): Promise<{
     refused: Decision | null;
@@ -514,7 +554,12 @@ export class BuiltinDecider implements Decider {
         return refuse(
           `Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`,
         );
-      const named = reach.files.map((file) => [file, relativise(root, file)] as const);
+      // Files the tool would never open — outside its globs or types — cannot be reached by it.
+      const keep = search.filter ? compileFilter(search.filter) : null;
+      const opened = keep
+        ? reach.files.filter((file) => keep(candidate(file, dir, search.cwd)))
+        : reach.files;
+      const named = opened.map((file) => [file, relativise(root, file)] as const);
       const denied = named.filter(([, relativePath]) =>
         firstMatch(this.deny, "read", [relativePath]),
       );
@@ -569,7 +614,13 @@ export class BuiltinDecider implements Decider {
     if (operation.kind === "read" && operation.recursive) {
       const { refused, reached } = await this.reach(
         operation.paths,
-        { hidden: true, follow: false, respectsIgnore: true },
+        {
+          hidden: true,
+          follow: false,
+          respectsIgnore: true,
+          filter: operation.filter,
+          cwd: context.workspaceRoot,
+        },
         context.workspaceRoot,
       );
       if (refused) return refused;
@@ -592,7 +643,7 @@ export class BuiltinDecider implements Decider {
         if (!search) continue;
         const { refused } = await this.reach(
           search.dirs,
-          search,
+          { ...search, cwd: operation.cwd },
           context.workspaceRoot,
         );
         if (refused) return refused;
