@@ -20,6 +20,19 @@ All notable changes to Portrail are recorded here. The format follows
   it (`TOO_MANY_FAILURES`, `Retry-After`); every failure is logged with the address, the
   code and the route. Forwarded addresses are believed only from a loopback peer.
 
+### Added
+
+- `portrail prune [--days n]` runs retention on demand and reports what it removed. It is
+  safe next to a running gateway: sessions with an active run are kept.
+- Extensions can implement `onRetention(cutoff, host)` to prune their own records with the
+  same cutoff the core used.
+
+### Fixed
+
+- Retention now runs when the daemon starts, not only an hour later, so sessions that
+  piled up while no daemon ran are removed before it listens. A session's records are
+  deleted in bulk.
+
 ### Changed
 
 - Runs, operations and keys are found through indexed columns instead of reading every

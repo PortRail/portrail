@@ -7,7 +7,9 @@ import { Keys, publicKey } from "../core/keys.ts";
 import { Gateway } from "../core/gateway.ts";
 import { BuiltinDecider } from "../decide/builtin.ts";
 import { loadConfig, type PortrailConfig } from "../config.ts";
-import { databasePath, runningDaemon, startDaemon } from "../daemon.ts";
+import { databasePath, runningDaemon, startDaemon, sweep } from "../daemon.ts";
+import { loadExtension } from "../extension-loader.ts";
+import type { ExtensionHost } from "../extension.ts";
 import { Store } from "../store/index.ts";
 import { dataDirectory, ensurePrivateDirectory } from "../store/paths.ts";
 import { version } from "../runtime.ts";
@@ -673,6 +675,51 @@ export async function service(args: ParsedArgs): Promise<number> {
 // ----------------------------------------------------------------- logs
 
 /** Recent runs and their decisions, straight from the store. `-f` follows new events. */
+// ---------------------------------------------------------------- prune
+
+/** The daemon does this at start and hourly; here it happens now, offline, on request. */
+export async function prune(args: ParsedArgs): Promise<number> {
+  const json = flagBool(args, "json");
+  const requested = flagNumber(args, "days");
+  if (requested !== undefined && !Number.isInteger(requested))
+    throw new Error(
+      `--days must be a whole number of days, got "${flagString(args, "days")}".`,
+    );
+  if (requested !== undefined && requested < 1)
+    throw new Error("--days must be at least 1.");
+  const ctx = offline(flagString(args, "home"));
+  try {
+    const days = requested ?? ctx.config.retentionDays;
+    const { extension } = await loadExtension();
+    // Same host shape the daemon builds, minus anything that would dispatch a run.
+    const host: ExtensionHost = {
+      version,
+      dataDir: ctx.dataDir,
+      store: ctx.store,
+      gateway: ctx.gateway,
+      options: {},
+      resolve: (operationId, decision, actor) =>
+        ctx.gateway.resolve(operationId, decision, actor),
+    };
+    const removed = await sweep(ctx.gateway, days, extension, host);
+    const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    out(
+      json,
+      { days, ...removed },
+      () =>
+        `Removed ${plural(removed.sessions, "session")} older than ${plural(days, "day")} ` +
+        `(${plural(removed.runs, "run")}, ${plural(removed.operations, "operation")}, ` +
+        `${plural(removed.events, "event")}, ${plural(removed.commands, "command")} record${removed.commands === 1 ? "" : "s"}).` +
+        (extension ? ` ${extension.name} pruned its own records too.` : ""),
+    );
+    return 0;
+  } finally {
+    ctx.close();
+  }
+}
+
+// ----------------------------------------------------------------- logs
+
 export async function logs(args: ParsedArgs): Promise<number> {
   const json = flagBool(args, "json");
   const follow = flagBool(args, "f") || flagBool(args, "follow");
