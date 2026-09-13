@@ -272,19 +272,20 @@ function leadingAssignment(segment: string): { rest: string; refused: string | n
 }
 
 /** The values a rule is matched against, per operation kind. */
-function subjects(operation: Operation, workspaceRoot: string): string[] {
-  const relativise = (path: string) => {
-    const full = resolve(workspaceRoot, path);
-    const inside = relative(workspaceRoot, full);
-    // Paths outside the workspace are rejected before we get here, but be explicit.
-    return inside === "" ? "." : inside.split(sep).join("/");
-  };
+/** A path as the rules see it: relative to the workspace, forward slashes. */
+function relativise(workspaceRoot: string, path: string): string {
+  const full = resolve(workspaceRoot, path);
+  const inside = relative(workspaceRoot, full);
+  // Paths outside the workspace are rejected before we get here, but be explicit.
+  return inside === "" ? "." : inside.split(sep).join("/");
+}
 
+function subjects(operation: Operation, workspaceRoot: string): string[] {
   switch (operation.kind) {
     case "read":
-      return operation.paths.map(relativise);
+      return operation.paths.map((path) => relativise(workspaceRoot, path));
     case "write":
-      return operation.changes.map((change) => relativise(change.path));
+      return operation.changes.map((change) => relativise(workspaceRoot, change.path));
     case "exec":
       return commandSegments(operation.command).segments;
     case "net":
@@ -355,6 +356,18 @@ export class BuiltinDecider implements Decider {
           verdict: "deny",
           reason: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
         };
+      // A command that names a file is a read of that file, whatever the file is called
+      // on the command line: containment resolved the names to what is on disk.
+      if (operation.paths?.length) {
+        const named = operation.paths.map((path) => relativise(context.workspaceRoot, path));
+        const denied = firstMatch(this.deny, "read", named);
+        if (denied)
+          return {
+            verdict: "deny",
+            reason: `Refused by the deny list (${denied.source}): the command reads ${named.find((path) => denied.test(path))}.`,
+            rule: denied.source,
+          };
+      }
     }
 
     // Deny first, and a single denied path — or command segment — refuses the whole operation.

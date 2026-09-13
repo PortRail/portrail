@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { globToRegExp, parsePattern } from "../src/decide/match.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
+import { containOperation } from "../src/core/gateway.ts";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import type { Operation } from "../src/types.ts";
 import type { DecisionContext } from "../src/extension.ts";
@@ -238,4 +242,29 @@ test("every shell operator separates segments, and what text cannot judge is ref
   assert.equal((await exec("cat .claude/settings.json")).verdict, "allow");
   assert.equal((await exec("cat ~/.claude/settings.json")).verdict, "deny");
   assert.equal((await exec("cat /home/x/.codex/auth.json")).verdict, "deny");
+});
+
+test("a command that names a file is judged as a read of that file, by its real path", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "portrail-named-"));
+  mkdirSync(join(ws, "src"));
+  mkdirSync(join(ws, "confidential"));
+  writeFileSync(join(ws, ".env"), "API_KEY=x");
+  writeFileSync(join(ws, "src", "a.ts"), "");
+  writeFileSync(join(ws, "confidential", "plan.txt"), "");
+  symlinkSync(join(ws, ".env"), join(ws, "innocent.txt"));
+  const judge = async (command: string, lists = DEFAULT_CONFIG.decide) => {
+    const contained = containOperation({ ...base, kind: "exec", command, cwd: ws }, ws);
+    assert.equal(contained.refused, null, command);
+    return new BuiltinDecider(lists).decide(contained.operation, { ...context, workspaceRoot: contained.root });
+  };
+
+  const alias = await judge("cat innocent.txt");
+  assert.equal(alias.verdict, "deny");
+  assert.equal(alias.rule, "read:.env*");
+  assert.match(alias.reason, /reads \.env/);
+  assert.equal((await judge("cat src/a.ts")).verdict, "allow");
+
+  const custom = { allow: ["read:**", "write:**", "exec:*"], deny: ["read:confidential/**"], ask: [] };
+  assert.equal((await judge("head confidential/plan.txt", custom)).verdict, "deny");
+  assert.equal((await judge("ls confidential", custom)).verdict, "allow", "naming the directory is not reading the files in it");
 });
