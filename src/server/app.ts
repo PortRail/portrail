@@ -5,6 +5,7 @@ import type { Gateway } from "../core/gateway.ts";
 import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
 import { obj, optNum, optStr, str } from "./body.ts";
+import { AuthGuard } from "./auth-guard.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
 import {
   digest,
@@ -111,18 +112,40 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   // ------------------------------------------------------------ plumbing
 
-  app.addHook("onRequest", async (_request, reply) => {
+  // Ten failed authentications from one address in a minute lock it out for the rest of it.
+  const guard = new AuthGuard();
+
+  app.addHook("onRequest", async (request, reply) => {
     reply.headers({
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
       "X-Portrail-Version": version,
     });
+    // A locked-out address is refused before anything is looked at. Liveness without a
+    // credential is still answered, so a monitor behind the same address keeps working.
+    const wait = guard.retryAfter(request.ip);
+    if (
+      wait > 0 &&
+      (request.routeOptions.url !== "/health" ||
+        request.headers.authorization !== undefined)
+    )
+      fail(
+        429,
+        "TOO_MANY_FAILURES",
+        `Too many failed authentications from this address. Try again in ${wait} s.`,
+        { retryAfterSeconds: wait },
+      );
   });
 
   app.setErrorHandler((error: any, request, reply) => {
-    if (error instanceof PortrailError)
+    if (error instanceof PortrailError) {
+      if (error.status === 401)
+        guard.failed(request.ip, error.code, request.method, request.url);
+      if (error.status === 429 && typeof error.details.retryAfterSeconds === "number")
+        reply.header("Retry-After", String(error.details.retryAfterSeconds));
       return reply.code(error.status).send(error.toJSON());
+    }
     const status =
       error.statusCode === 413
         ? 413

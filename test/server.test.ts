@@ -726,3 +726,166 @@ test("a request must arrive within 30 s and an idle connection is closed after 6
   assert.equal(s.app.server.keepAliveTimeout, 65_000);
   await s.close();
 });
+
+test("ten wrong keys from one address lock it out for the rest of the minute, and nobody else", async () => {
+  const s = await serverWithKey();
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...parts: unknown[]) => lines.push(parts.join(" "));
+  try {
+    const bogus = { authorization: "Bearer prt_bogus_bogus_bogus_bogus_bogus" };
+    for (let i = 0; i < 10; i++)
+      assert.equal(
+        (
+          await s.app.inject({
+            method: "GET",
+            url: "/v1/runs",
+            headers: bogus,
+            remoteAddress: "203.0.113.5",
+          })
+        ).statusCode,
+        401,
+      );
+    const locked = await s.app.inject({
+      method: "GET",
+      url: "/v1/runs",
+      headers: bogus,
+      remoteAddress: "203.0.113.5",
+    });
+    assert.equal(locked.statusCode, 429);
+    assert.equal(locked.json().error.code, "TOO_MANY_FAILURES");
+    assert.equal(locked.json().error.retryable, true);
+    assert.match(locked.headers["retry-after"] as string, /^\d+$/);
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: s.headers,
+          remoteAddress: "203.0.113.5",
+        })
+      ).statusCode,
+      429,
+      "the right key does not unlock the address early",
+    );
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: s.headers,
+          remoteAddress: "203.0.113.6",
+        })
+      ).statusCode,
+      200,
+      "another address is unaffected",
+    );
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/health",
+          remoteAddress: "203.0.113.5",
+        })
+      ).statusCode,
+      200,
+      "liveness stays answerable",
+    );
+    assert.equal(
+      lines.filter((line) =>
+        line.startsWith("auth failed from 203.0.113.5: UNAUTHORIZED GET /v1/runs"),
+      ).length,
+      10,
+    );
+    assert.equal(lines.filter((line) => /locked out/.test(line)).length, 1);
+    assert.ok(
+      !lines.some((line) => line.includes("prt_bogus")),
+      "the key never reaches the log",
+    );
+  } finally {
+    console.error = original;
+    await s.close();
+  }
+});
+
+test("a forwarded address is believed from a loopback peer only", async () => {
+  const s = await serverWithKey();
+  const original = console.error;
+  console.error = () => {};
+  try {
+    const bogus = {
+      authorization: "Bearer prt_bogus_bogus_bogus_bogus_bogus",
+      "x-forwarded-for": "198.51.100.7",
+    };
+    for (let i = 0; i < 10; i++)
+      await s.app.inject({
+        method: "GET",
+        url: "/v1/runs",
+        headers: bogus,
+        remoteAddress: "127.0.0.1",
+      });
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: bogus,
+          remoteAddress: "127.0.0.1",
+        })
+      ).statusCode,
+      429,
+      "the tunnel's client is locked",
+    );
+    const other = { ...bogus, "x-forwarded-for": "198.51.100.8" };
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: other,
+          remoteAddress: "127.0.0.1",
+        })
+      ).statusCode,
+      401,
+      "another client of the same tunnel is not",
+    );
+    const spoofed = {
+      authorization: bogus.authorization,
+      "x-forwarded-for": "198.51.100.99",
+    };
+    for (let i = 0; i < 10; i++)
+      await s.app.inject({
+        method: "GET",
+        url: "/v1/runs",
+        headers: spoofed,
+        remoteAddress: "10.0.0.9",
+      });
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: spoofed,
+          remoteAddress: "10.0.0.9",
+        })
+      ).statusCode,
+      429,
+      "a remote client's claimed address is ignored: the peer itself is locked",
+    );
+    assert.equal(
+      (
+        await s.app.inject({
+          method: "GET",
+          url: "/v1/runs",
+          headers: { authorization: bogus.authorization },
+          remoteAddress: "198.51.100.99",
+        })
+      ).statusCode,
+      401,
+      "and the claimed address is not",
+    );
+  } finally {
+    console.error = original;
+    await s.close();
+  }
+});
