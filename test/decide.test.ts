@@ -268,3 +268,104 @@ test("a command that names a file is judged as a read of that file, by its real 
   assert.equal((await judge("head confidential/plan.txt", custom)).verdict, "deny");
   assert.equal((await judge("ls confidential", custom)).verdict, "allow", "naming the directory is not reading the files in it");
 });
+
+test("a differently cased secret or program is the same secret or program", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of ["SUDO ls", "Curl http://x", "cat .ENV", "git show HEAD:.ENV", "cat ~/.Aws/Credentials", "CAT ~/.SSH/ID_RSA"]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+  }
+});
+
+test("deny rules see through wrappers, shell keywords, parentheses and the program's path", async () => {
+  const decider = new BuiltinDecider({ allow: ["exec:*"], deny: ["exec:curl *"] });
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "env curl http://x",
+    "command curl http://x",
+    "command -p curl http://x",
+    "(curl http://x)",
+    "if true; then curl http://x; fi",
+    "nohup curl http://x",
+    "time curl http://x",
+    "nice -n 5 curl http://x",
+    "echo x | xargs -n1 curl",
+    "timeout 5 curl http://x",
+    "/usr/bin/curl http://x",
+    "env -S 'curl http://x'",
+  ]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+  }
+  assert.match((await decider.decide(exec("env -S 'curl http://x'"), context)).reason, /options to env/);
+
+  const defaults = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  assert.equal((await defaults.decide(exec("command -v node"), context)).verdict, "allow");
+  assert.equal((await defaults.decide(exec("env CI=1 npm test"), context)).verdict, "allow", "a harmless env prefix is stripped for the allow list too");
+  assert.equal((await defaults.decide(exec("./bin/git status"), context)).verdict, "deny", "a workspace script is not git, whatever it is called");
+  assert.equal((await defaults.decide(exec("/usr/bin/env node --version"), context)).verdict, "deny", "allow rules never match by bare program name");
+});
+
+test("the built-in allow list names whole commands, and the deny list covers the write and code-running switches of read-only tools", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "npm testx", "npm run build-and-deploy", "lsof -i", "sortx",
+    "node --test evil.js", "node --test --import ./evil.mjs", "node -p 1", "node -pe 1", "node -r ./x.js y",
+    "git branch -D main", "git branch --delete main", "git branch -M main x",
+    "git log --output=out.txt", "git diff --output=x",
+    "sort -o out.txt f", "sort --output=x f", "sort --compress-program=sh f",
+    "rg --pre cat foo src", "cat .envrc", "git show HEAD:.envrc",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "deny", command);
+  for (const command of [
+    "npm test", "npm test -- test/a.test.ts", "npm run test:unit", "npm run build", "npm run lint:fix", "pnpm run typecheck", "yarn test",
+    "ls", "ls -la", "sort -u", "tsc", "tsc --noEmit", "node --test", "git status", "git status --short",
+    "git branch", "git branch --show-current", "git branch -a", "git branch -vv", "git branch --list 'fix-*'", "git branch --merged",
+    "date", "date +%Y", "uname -a", "sed -n '1,40p' src/a.ts",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "allow", command);
+});
+
+test("sed may only print or filter: no writing, reading, executing, in-place editing or script files", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "sed -n '1,240p' src/a.ts",
+    "sed -n '10p' f",
+    "sed -n '/^import/p' f",
+    "sed -n '/start/,/end/p' f",
+    "sed -n '$=' f",
+    "sed -n -e '1p' -e '5p' f",
+    "sed -n '1p;5p;$p' f",
+    "sed -n 's/foo/bar/p' f",
+    "sed -n 's/a\\/b/c/gp' f",
+    "sed -nE '/^(a|b)/p' f",
+    "sed -n '5!p' f",
+    "sed -n 'l' f",
+    "sed -n 'y/abc/xyz/;p' f",
+    "sed -n '0,/x/p' f",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "allow", command);
+  for (const command of [
+    "sed -n 1w/tmp/x README.md",
+    "sed -n '1w /tmp/x' f",
+    "sed -n 'W /tmp/x' f",
+    "sed -n 's/a/b/w /tmp/x' f",
+    "sed -n 's/a/b/e' f",
+    "sed -n -i 's/a/b/' f",
+    "sed -ni 's/a/b/' f",
+    "sed -n --in-place 's/a/b/' f",
+    "sed -i '' 's/a/b/' f",
+    "sed -n 'e whoami' f",
+    "sed -n 'r /etc/passwd' f",
+    "sed -n 'R x' f",
+    "sed -n -f script.sed f",
+    "sed -n --file=x f",
+    "sed -n 's|a|b|p' f",
+    "sed -n '1,10{p}' f",
+    "sed -n '1~2p' f",
+  ]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+    assert.match(decision.reason, /print or filter|No allow rule/, command);
+  }
+});

@@ -28,8 +28,9 @@ export function globToRegExp(pattern: string, pathMode: boolean): RegExp {
       source += character.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     }
   }
-  // Case-insensitive for paths: APFS and NTFS are, so ".ENV" is ".env".
-  return new RegExp(source + "$", pathMode ? "i" : "");
+  // Case-insensitive for every kind: APFS and NTFS are, so ".ENV" is ".env" — and a
+  // command that names it is the same command however it is capitalised.
+  return new RegExp(source + "$", "i");
 }
 
 export interface Pattern {

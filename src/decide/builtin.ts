@@ -3,6 +3,7 @@ import type { Decider, DecisionContext } from "../extension.ts";
 import type { Decision, Operation } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
+import { sedObjection } from "./sed.ts";
 
 /** One segment of a command line, in the forms a rule may be matched against. */
 export interface CommandSegment {
@@ -16,6 +17,8 @@ export interface CommandSegment {
   unwrapped: string;
   /** `unwrapped` with the program reduced to its name: `/usr/bin/curl x` → `curl x`. */
   named: string;
+  /** The program gets its arguments from stdin (`xargs`), so what runs has more words than we see. */
+  fed: boolean;
 }
 
 /**
@@ -54,25 +57,11 @@ export function parseCommand(command: string): { segments: CommandSegment[]; unj
       text: words.join(" "),
       unwrapped: inner.words.join(" "),
       named: (renamed.refused ? namedWords : renamed.words).join(" "),
+      fed: inner.fed,
     });
   }
-  if (!segments.length) segments.push({ words: [trimmed], programIndex: 0, text: trimmed, unwrapped: trimmed, named: trimmed });
+  if (!segments.length) segments.push({ words: [trimmed], programIndex: 0, text: trimmed, unwrapped: trimmed, named: trimmed, fed: false });
   return { segments, unjudgeable: null };
-}
-
-/** The segments of a command line as text, or the reason the line cannot be judged. */
-export function commandSegments(command: string): { segments: string[]; unjudgeable: string | null } {
-  const parsed = parseCommand(command);
-  return { segments: parsed.unjudgeable ? [command.trim()] : parsed.segments.map((segment) => segment.text), unjudgeable: parsed.unjudgeable };
-}
-
-/**
- * Every segment of a command line as unquoted words, for anything that inspects
- * arguments — and the reason the line cannot be judged at all, if there is one.
- */
-export function commandWords(command: string): { words: string[][]; unjudgeable: string | null } {
-  const parsed = parseCommand(command);
-  return { words: parsed.segments.map((segment) => segment.words), unjudgeable: parsed.unjudgeable };
 }
 
 /** Shell keywords that may precede a command inside a compound. */
@@ -89,8 +78,9 @@ const XARGS_WITH_VALUE = new Set([
  * deny rule for `curl` also sees `env curl`, `nohup curl`, `xargs curl`. Options that
  * would change what runs (`env -S`, `nohup -p`) are refused: a rule cannot judge them.
  */
-function unwrap(input: readonly string[]): { words: string[]; refused: string | null } {
+function unwrap(input: readonly string[]): { words: string[]; refused: string | null; fed: boolean } {
   let words = [...input];
+  let fed = false;
   for (let guard = 0; guard < 8 && words.length; guard++) {
     const head = words[0]!;
     if (KEYWORDS.has(head)) {
@@ -99,10 +89,10 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
     }
     if (head === "env") {
       words.shift();
-      if (words[0]?.startsWith("-")) return { words, refused: "options to env" };
+      if (words[0]?.startsWith("-")) return { words, refused: "options to env", fed };
       while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) {
         const name = words[0]!.slice(0, words[0]!.indexOf("="));
-        if (!HARMLESS_ASSIGNMENT.test(name)) return { words, refused: `an environment assignment (${name})` };
+        if (!HARMLESS_ASSIGNMENT.test(name)) return { words, refused: `an environment assignment (${name})`, fed };
         words.shift();
       }
       continue;
@@ -116,7 +106,7 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
     }
     if (PLAIN_WRAPPERS.has(head)) {
       words.shift();
-      if (words[0]?.startsWith("-")) return { words, refused: `options to ${head}` };
+      if (words[0]?.startsWith("-")) return { words, refused: `options to ${head}`, fed };
       continue;
     }
     if (head === "nice") {
@@ -141,6 +131,7 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
     }
     if (head === "xargs") {
       words.shift();
+      fed = true;
       while (words[0]?.startsWith("-")) {
         const flag = words.shift()!;
         if (XARGS_WITH_VALUE.has(flag)) words.shift();
@@ -149,7 +140,7 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
     }
     break;
   }
-  return { words, refused: null };
+  return { words, refused: null, fed };
 }
 
 /**
@@ -280,18 +271,35 @@ function relativise(workspaceRoot: string, path: string): string {
   return inside === "" ? "." : inside.split(sep).join("/");
 }
 
-function subjects(operation: Operation, workspaceRoot: string): string[] {
+/**
+ * One thing a rule is matched against, in every form that means the same thing.
+ * Deny rules match any form: `env curl x`, `curl x` and `/usr/bin/curl x` are all
+ * `curl x` to a deny. Allow rules match only the line as written or with wrappers
+ * removed — never the bare program name, so `./bin/git status` is not `git status`.
+ */
+interface Subject {
+  deny: string[];
+  allow: string[];
+}
+
+const plain = (value: string): Subject => ({ deny: [value], allow: [value] });
+
+function subjects(operation: Operation, workspaceRoot: string): Subject[] {
   switch (operation.kind) {
     case "read":
-      return operation.paths.map((path) => relativise(workspaceRoot, path));
+      return operation.paths.map((path) => plain(relativise(workspaceRoot, path)));
     case "write":
-      return operation.changes.map((change) => relativise(workspaceRoot, change.path));
+      return operation.changes.map((change) => plain(relativise(workspaceRoot, change.path)));
     case "exec":
-      return commandSegments(operation.command).segments;
+      return parseCommand(operation.command).segments.map((segment) => ({
+        // A program fed by xargs runs with words we cannot see; `curl *` must still see it.
+        deny: [...new Set([segment.text, segment.unwrapped, segment.named, ...(segment.fed ? [`${segment.unwrapped} <stdin>`, `${segment.named} <stdin>`] : [])])],
+        allow: [...new Set([segment.text, segment.unwrapped])],
+      }));
     case "net":
-      return [operation.host ?? operation.url ?? "*"];
+      return [plain(operation.host ?? operation.url ?? "*")];
     case "tool":
-      return [`${operation.server}/${operation.tool}`];
+      return [plain(`${operation.server}/${operation.tool}`)];
   }
 }
 
@@ -305,13 +313,21 @@ function firstMatch(
   );
 }
 
-function everyValueMatches(
+function firstDenied(patterns: readonly Pattern[], kind: string, subjects: readonly Subject[]): Pattern | undefined {
+  return firstMatch(patterns, kind, subjects.flatMap((subject) => subject.deny));
+}
+
+function firstAllowed(patterns: readonly Pattern[], kind: string, subjects: readonly Subject[]): Pattern | undefined {
+  return firstMatch(patterns, kind, subjects.flatMap((subject) => subject.allow));
+}
+
+function everySubjectMatches(
   patterns: readonly Pattern[],
   kind: string,
-  values: readonly string[],
+  subjects: readonly Subject[],
 ): boolean {
-  return values.every((value) =>
-    patterns.some((pattern) => pattern.kind === kind && pattern.test(value)),
+  return subjects.every((subject) =>
+    subject.allow.some((value) => patterns.some((pattern) => pattern.kind === kind && pattern.test(value))),
   );
 }
 
@@ -339,23 +355,26 @@ export class BuiltinDecider implements Decider {
     operation: Operation,
     context: DecisionContext,
   ): Promise<Decision> {
-    const values = subjects(operation, context.workspaceRoot);
-
-    // An operation that declares nothing cannot be judged, and [].every() is true.
-    if (values.length === 0) {
-      if (operation.kind === "read")
-        values.push(".");
-      else
-        return { verdict: "deny", reason: `Refused: a ${operation.kind} operation with nothing declared.` };
-    }
-
     if (operation.kind === "exec") {
-      const { unjudgeable } = commandSegments(operation.command);
+      const { unjudgeable } = parseCommand(operation.command);
       if (unjudgeable)
         return {
           verdict: "deny",
           reason: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
         };
+    }
+
+    const values = subjects(operation, context.workspaceRoot);
+
+    // An operation that declares nothing cannot be judged, and [].every() is true.
+    if (values.length === 0) {
+      if (operation.kind === "read")
+        values.push(plain("."));
+      else
+        return { verdict: "deny", reason: `Refused: a ${operation.kind} operation with nothing declared.` };
+    }
+
+    if (operation.kind === "exec") {
       // A command that names a file is a read of that file, whatever the file is called
       // on the command line: containment resolved the names to what is on disk.
       if (operation.paths?.length) {
@@ -371,7 +390,7 @@ export class BuiltinDecider implements Decider {
     }
 
     // Deny first, and a single denied path — or command segment — refuses the whole operation.
-    const denied = firstMatch(this.deny, operation.kind, values);
+    const denied = firstDenied(this.deny, operation.kind, values);
     if (denied)
       return {
         verdict: "deny",
@@ -379,9 +398,22 @@ export class BuiltinDecider implements Decider {
         rule: denied.source,
       };
 
+    // sed is allowed for reading, so its script must be one that only reads.
+    if (operation.kind === "exec")
+      for (const segment of parseCommand(operation.command).segments) {
+        const program = segment.words.slice(segment.programIndex);
+        if (!["sed", "gsed"].includes(basename(program[0] ?? ""))) continue;
+        const objection = sedObjection(program);
+        if (objection)
+          return {
+            verdict: "deny",
+            reason: `Refused: only sed scripts that print or filter are allowed (${objection}). Use -n or -E with p, d, s/…/…/ and addresses; w, r, e, -i and -f cannot be judged by a rule.`,
+          };
+      }
+
     // Every path in a multi-file change, and every segment of a command, must be allowed.
-    if (everyValueMatches(this.allow, operation.kind, values)) {
-      const matched = firstMatch(this.allow, operation.kind, values);
+    if (everySubjectMatches(this.allow, operation.kind, values)) {
+      const matched = firstAllowed(this.allow, operation.kind, values);
       return {
         verdict: "allow",
         reason: `Allowed by ${matched?.source ?? "the allow list"}.`,
@@ -392,8 +424,8 @@ export class BuiltinDecider implements Decider {
 
     // Every segment must be covered by allow or ask for the question to be worth asking:
     // a segment nobody would allow makes the whole command a refusal, not a question.
-    if (this.ask.length && everyValueMatches([...this.allow, ...this.ask], operation.kind, values)) {
-      const matched = firstMatch(this.ask, operation.kind, values);
+    if (this.ask.length && everySubjectMatches([...this.allow, ...this.ask], operation.kind, values)) {
+      const matched = firstAllowed(this.ask, operation.kind, values);
       return {
         verdict: "ask",
         reason: `Matches ${matched?.source ?? "the ask list"}; waiting for an answer at this machine.`,

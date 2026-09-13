@@ -86,6 +86,7 @@ export const EXTENSION_MODULE = "@portrail/pro";
 export { PortrailError, ensure, fail } from "./contracts/errors.ts";
 export { digest, id as newId, now, secret, canonical, equal } from "./store/index.ts";
 export { globToRegExp } from "./decide/match.ts";
+export { sedObjection } from "./decide/sed.ts";
 export { canonicalPath } from "./core/gateway.ts";
 export type { RunRecord, SessionRecord, OperationRecord } from "./core/records.ts";
 export type { KeyRecord, Principal, Scope } from "./core/keys.ts";
