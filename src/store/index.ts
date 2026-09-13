@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -43,23 +43,37 @@ export interface PortrailEvent {
   data: Record<string, unknown>;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const SCHEMA = `
+/**
+ * Fields read straight out of the JSON so a query can filter on them without parsing
+ * every row. Virtual generated columns: never written, always in step with `data`.
+ */
+const GENERATED: ReadonlyArray<readonly [column: string, path: string]> = [
+  ["state", "$.state"],
+  ["run_id", "$.runId"],
+  ["hash", "$.hash"],
+];
+const generated = ([column, path]: readonly [string, string]) =>
+  `${column} TEXT GENERATED ALWAYS AS (json_extract(data, '${path}')) VIRTUAL`;
+
+const PRAGMAS = `
 PRAGMA journal_mode=WAL;
 PRAGMA busy_timeout=5000;
 PRAGMA foreign_keys=ON;
 PRAGMA synchronous=FULL;
 PRAGMA secure_delete=ON;
-BEGIN IMMEDIATE;
+`;
+
+const TABLES = `
 CREATE TABLE IF NOT EXISTS records (
   kind TEXT NOT NULL,
   id TEXT NOT NULL,
   session_id TEXT,
   data TEXT NOT NULL,
+  ${GENERATED.map(generated).join(",\n  ")},
   PRIMARY KEY (kind, id)
 );
-CREATE INDEX IF NOT EXISTS records_session ON records(kind, session_id);
 CREATE TABLE IF NOT EXISTS events (
   session_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
@@ -76,17 +90,38 @@ CREATE TABLE IF NOT EXISTS commands (
   created_at TEXT NOT NULL,
   PRIMARY KEY (principal, route, key)
 );
-PRAGMA user_version=${SCHEMA_VERSION};
-COMMIT;
 `;
 
-/**
- * A small record store on top of node:sqlite.
- *
- * Everything is a JSON document addressed by (kind, id). That keeps the schema
- * stable while the product's shapes move, and it is fast enough by a wide margin
- * for a single-operator gateway.
- */
+const INDEXES = `
+CREATE INDEX IF NOT EXISTS records_session ON records(kind, session_id);
+CREATE INDEX IF NOT EXISTS records_state ON records(kind, state);
+CREATE INDEX IF NOT EXISTS records_run ON records(kind, run_id) WHERE run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS records_hash ON records(kind, hash) WHERE hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS commands_created ON commands(created_at);
+`;
+
+/** What a query may filter on. Anything else never reaches SQL. */
+export interface RecordFilter {
+  sessionId?: string;
+  state?: string | readonly string[];
+  runId?: string;
+  hash?: string;
+}
+
+export interface SelectOptions extends RecordFilter {
+  /** Newest first by insertion; the default is oldest first, like list(). */
+  newestFirst?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+const COLUMNS = {
+  sessionId: "session_id",
+  state: "state",
+  runId: "run_id",
+  hash: "hash",
+} as const;
+
 export class Store {
   readonly db: DatabaseSync;
   private transactions: Array<Array<() => void>> = [];
@@ -96,19 +131,57 @@ export class Store {
     this.db = new DatabaseSync(path);
     if (path !== ":memory:") chmodSync(path, 0o600);
 
-    const version = this.db.prepare("PRAGMA user_version").get() as {
-      user_version: number;
-    };
-    if (version.user_version > SCHEMA_VERSION) {
-      this.db.close();
-      throw new Error(
-        "This database was written by a newer version of Portrail. Upgrade Portrail or use a different PORTRAIL_HOME.",
-      );
-    }
-    this.db.exec(SCHEMA);
+    this.db.exec(PRAGMAS);
+    this.migrate();
 
     if (!this.get("meta", "install"))
       this.put("meta", { id: "install", createdAt: now() });
+  }
+
+  /**
+   * Bring the file to the current schema in one transaction. Structural, not
+   * version-driven: whatever is missing is added, so a daemon and a CLI opening the
+   * same file at once cannot get in each other's way — BEGIN IMMEDIATE serialises
+   * them and the second finds nothing left to do.
+   */
+  private migrate() {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const { user_version } = this.db.prepare("PRAGMA user_version").get() as {
+        user_version: number;
+      };
+      if (user_version > SCHEMA_VERSION)
+        throw new Error(
+          "This database was written by a newer version of Portrail. Upgrade Portrail or use a different PORTRAIL_HOME.",
+        );
+      this.db.exec(TABLES);
+      const columns = new Set(
+        (
+          this.db
+            .prepare("SELECT name FROM pragma_table_xinfo('records')")
+            .all() as Array<{ name: string }>
+        ).map((c) => c.name),
+      );
+      for (const column of GENERATED)
+        if (!columns.has(column[0]))
+          this.db.exec(`ALTER TABLE records ADD COLUMN ${generated(column)}`);
+      this.db.exec(INDEXES);
+      if (user_version !== SCHEMA_VERSION)
+        this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Nothing was written.
+      }
+      this.db.close();
+      throw /newer version/.test((error as Error).message)
+        ? error
+        : new Error(
+            `Could not upgrade the database at ${this.path} to schema ${SCHEMA_VERSION}: ${(error as Error).message}`,
+          );
+    }
   }
 
   /**
@@ -162,15 +235,110 @@ export class Store {
   }
 
   list<T = any>(kind: string, sessionId?: string): T[] {
-    const sql = sessionId
-      ? "SELECT data FROM records WHERE kind=? AND session_id=? ORDER BY rowid"
-      : "SELECT data FROM records WHERE kind=? ORDER BY rowid";
-    const rows = (
-      sessionId
-        ? this.db.prepare(sql).all(kind, sessionId)
-        : this.db.prepare(sql).all(kind)
-    ) as Array<{ data: string }>;
-    return rows.map((row) => JSON.parse(row.data) as T);
+    return this.select<T>(kind, { sessionId });
+  }
+
+  private where(
+    kind: string,
+    filter: RecordFilter,
+  ): { sql: string; params: SQLInputValue[] } {
+    const clauses = ["kind=?"];
+    const params: SQLInputValue[] = [kind];
+    for (const key of Object.keys(COLUMNS) as Array<keyof RecordFilter>) {
+      const value = filter[key];
+      if (value === undefined) continue;
+      if (typeof value === "string") {
+        clauses.push(`${COLUMNS[key]}=?`);
+        params.push(value);
+      } else {
+        clauses.push(`${COLUMNS[key]} IN (${value.map(() => "?").join(",")})`);
+        params.push(...value);
+      }
+    }
+    return { sql: clauses.join(" AND "), params };
+  }
+
+  /** Records of one kind matching the filter, in insertion order unless asked otherwise. */
+  select<T = any>(kind: string, options: SelectOptions = {}): T[] {
+    const { sql, params } = this.where(kind, options);
+    let query = `SELECT data FROM records WHERE ${sql} ORDER BY rowid ${options.newestFirst ? "DESC" : "ASC"}`;
+    if (options.limit !== undefined) {
+      query += " LIMIT ? OFFSET ?";
+      params.push(options.limit, options.offset ?? 0);
+    }
+    return (this.db.prepare(query).all(...params) as Array<{ data: string }>).map(
+      (row) => JSON.parse(row.data) as T,
+    );
+  }
+
+  /** How many records match, without reading one. */
+  count(kind: string, filter: RecordFilter = {}): number {
+    const { sql, params } = this.where(kind, filter);
+    return Number(
+      (
+        this.db
+          .prepare(`SELECT COUNT(*) AS n FROM records WHERE ${sql}`)
+          .get(...params) as { n: number }
+      ).n,
+    );
+  }
+
+  findOne<T = any>(kind: string, filter: RecordFilter): T | undefined {
+    return this.select<T>(kind, { ...filter, limit: 1 })[0];
+  }
+
+  /** One page, newest first, with the total the same filter matches. */
+  page<T = any>(
+    kind: string,
+    filter: RecordFilter,
+    limit: number,
+    offset: number,
+  ): { items: T[]; total: number } {
+    return {
+      items: this.select<T>(kind, { ...filter, newestFirst: true, limit, offset }),
+      total: this.count(kind, filter),
+    };
+  }
+
+  /** Delete every record of one kind for a session; returns how many went. */
+  removeWhere(kind: string, filter: { sessionId: string }): number {
+    const { sql, params } = this.where(kind, filter);
+    return Number(
+      this.db.prepare(`DELETE FROM records WHERE ${sql}`).run(...params).changes,
+    );
+  }
+
+  removeEvents(sessionId: string): number {
+    return Number(
+      this.db.prepare("DELETE FROM events WHERE session_id=?").run(sessionId).changes,
+    );
+  }
+
+  /** The whole event log in write order, for a follower that must not poll every session. */
+  tailEvents(
+    afterRow: number,
+    limit = 200,
+  ): Array<{ row: number; event: PortrailEvent }> {
+    return (
+      this.db
+        .prepare(
+          "SELECT rowid AS row, data FROM events WHERE rowid>? ORDER BY rowid LIMIT ?",
+        )
+        .all(afterRow, limit) as Array<{ row: number; data: string }>
+    ).map(({ row, data }) => ({
+      row: Number(row),
+      event: JSON.parse(data) as PortrailEvent,
+    }));
+  }
+
+  latestEventRow(): number {
+    return Number(
+      (
+        this.db.prepare("SELECT COALESCE(MAX(rowid), 0) AS row FROM events").get() as {
+          row: number;
+        }
+      ).row,
+    );
   }
 
   put<T extends { id: string; sessionId?: string | null }>(kind: string, record: T): T {

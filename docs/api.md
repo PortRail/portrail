@@ -60,7 +60,9 @@ what. `portrail run` exits 2 in that case.
 
 ### `GET /v1/runs` `runs:read`
 
-`?session=ses_…&state=succeeded&limit=50&offset=0`. Newest first.
+`?session=ses_…&state=succeeded&limit=50&offset=0`. Newest first; `limit` 1–100 (default 50).
+The answer is `{ items, total, nextOffset? }`: `total` counts every run the filter matches,
+`nextOffset` is present while more remain. Filtering and paging happen in the database.
 
 ### `GET /v1/runs/:id` `runs:read`
 
@@ -119,7 +121,7 @@ session; the agent keeps its context.
 A session is one conversation with one agent in one workspace. Runs in the same session
 share context; the agent remembers earlier runs.
 
-- `GET /v1/sessions` `runs:read`
+- `GET /v1/sessions` `runs:read` — `?limit=&offset=`, newest first, `{ items, total, nextOffset? }`
 - `GET /v1/sessions/:id` `runs:read` — includes its runs
 - `POST /v1/sessions/:id/close` `runs:write`
 

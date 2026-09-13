@@ -679,16 +679,14 @@ export async function logs(args: ParsedArgs): Promise<number> {
   const limit = flagNumber(args, "limit") ?? 20;
   const ctx = offline(flagString(args, "home"));
   try {
-    const runs = ctx.store.list<RunRecord>("run").slice(-limit).reverse();
+    const runs = ctx.store.select<RunRecord>("run", { newestFirst: true, limit });
     if (json) {
       console.log(JSON.stringify({ items: runs }, null, 2));
     } else if (!runs.length) {
       console.log("No runs yet.");
     } else {
       for (const run of runs) {
-        const ops = ctx.store
-          .list<OperationRecord>("operation", run.sessionId)
-          .filter((op) => op.runId === run.id);
+        const ops = ctx.store.select<OperationRecord>("operation", { runId: run.id });
         const denied = ops.filter((op) => op.decision?.verdict === "deny").length;
         console.log(
           `${run.createdAt}  ${run.state.padEnd(17)} ${run.id}  ${ops.length} ops${denied ? ` (${denied} denied)` : ""}\n` +
@@ -701,29 +699,22 @@ export async function logs(args: ParsedArgs): Promise<number> {
     ctx.close();
   }
 
-  // Follow: poll the store for new events across all sessions.
-  const seen = new Map<string, number>();
+  // Follow: one cursor over the whole event log, in write order, across sessions.
   const tail = offline(flagString(args, "home"));
-  for (const session of tail.store.list<{ id: string; lastEventSeq: number }>(
-    "session",
-  ))
-    seen.set(session.id, session.lastEventSeq);
+  let cursor = tail.store.latestEventRow();
   console.log("— following —");
   for (;;) {
-    for (const session of tail.store.list<{ id: string; lastEventSeq: number }>(
-      "session",
-    )) {
-      const after = seen.get(session.id) ?? 0;
-      for (const event of tail.store.events(session.id, after, 200)) {
-        seen.set(session.id, event.seq);
-        if (json) console.log(JSON.stringify(event));
-        else if (event.type === "output.text")
-          process.stdout.write(String(event.data.text ?? ""));
-        else if (event.type !== "output.reasoning" && event.type !== "usage")
-          console.log(
-            `\n[${event.timestamp}] ${event.type} ${event.runId ?? ""} ${summarise(event.data)}`,
-          );
-      }
+    // A prune may have emptied the log behind us; never wait for a row that will not come.
+    cursor = Math.min(cursor, tail.store.latestEventRow());
+    for (const { row, event } of tail.store.tailEvents(cursor, 200)) {
+      cursor = row;
+      if (json) console.log(JSON.stringify(event));
+      else if (event.type === "output.text")
+        process.stdout.write(String(event.data.text ?? ""));
+      else if (event.type !== "output.reasoning" && event.type !== "usage")
+        console.log(
+          `\n[${event.timestamp}] ${event.type} ${event.runId ?? ""} ${summarise(event.data)}`,
+        );
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }

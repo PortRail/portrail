@@ -15,7 +15,7 @@ import {
   type Store,
   type PortrailEvent,
 } from "../store/index.ts";
-import { TERMINAL_STATES, type AgentId } from "../types.ts";
+import { TERMINAL_STATES, type AgentId, type RunState } from "../types.ts";
 import { API_PREFIX, version } from "../runtime.ts";
 import { SessionEventPacer } from "./event-pacer.ts";
 
@@ -269,16 +269,19 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     });
   }
 
-  function paginate<T>(request: FastifyRequest, items: T[]) {
+  /** `limit` 1–100 (default 50) and `offset`, as the client asked. */
+  function pageQuery(request: FastifyRequest) {
     const query = request.query as Record<string, string | undefined>;
-    const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50) || 50));
-    const offset = Math.max(0, Number(query.offset ?? 0) || 0);
     return {
-      items: items.slice(offset, offset + limit),
-      total: items.length,
-      ...(offset + limit < items.length ? { nextOffset: offset + limit } : {}),
+      limit: Math.min(100, Math.max(1, Number(query.limit ?? 50) || 50)),
+      offset: Math.max(0, Number(query.offset ?? 0) || 0),
     };
   }
+  const paged = <T>(items: T[], total: number, limit: number, offset: number) => ({
+    items,
+    total,
+    ...(offset + limit < total ? { nextOffset: offset + limit } : {}),
+  });
 
   // -------------------------------------------------------------- health
 
@@ -414,13 +417,13 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   app.get(`${API_PREFIX}/runs`, async (request) => {
     auth(request, "runs:read");
     const query = request.query as Record<string, string | undefined>;
-    return paginate(
-      request,
-      gateway
-        .listRuns(query.session)
-        .filter((run) => !query.state || run.state === query.state)
-        .map(runView),
+    const { limit, offset } = pageQuery(request);
+    const page = gateway.pageRuns(
+      { sessionId: query.session, state: query.state as RunState | undefined },
+      limit,
+      offset,
     );
+    return paged(page.items.map(runView), page.total, limit, offset);
   });
 
   app.get(`${API_PREFIX}/runs/:runId`, async (request) => {
@@ -504,10 +507,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       },
       `local:${who}`,
     );
-    return (
-      gateway.listOperations().find((op) => op.id === params(request).operationId) ??
-      fail(404, "NOT_FOUND", "Operation not found.")
-    );
+    return gateway.operation(params(request).operationId!);
   });
 
   // -------------------------------------------------------------- events
@@ -629,7 +629,9 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   app.get(`${API_PREFIX}/sessions`, async (request) => {
     auth(request, "runs:read");
-    return paginate(request, gateway.listSessions());
+    const { limit, offset } = pageQuery(request);
+    const page = gateway.pageSessions(limit, offset);
+    return paged(page.items, page.total, limit, offset);
   });
   app.get(`${API_PREFIX}/sessions/:sessionId`, async (request) => {
     auth(request, "runs:read");

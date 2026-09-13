@@ -129,6 +129,16 @@ export type RunState =
   | "cancelled"
   | "outcome_unknown";
 
+/** Between queued and terminal: a worker owns the run. Kept in step with RunState. */
+export const IN_FLIGHT_STATES: readonly RunState[] = [
+  "starting",
+  "running",
+  "waiting_for_approval",
+  "cancelling",
+];
+/** Anything that is not over yet, queued included. */
+export const ACTIVE_STATES: readonly RunState[] = ["queued", ...IN_FLIGHT_STATES];
+
 export const TERMINAL_STATES: ReadonlySet<RunState> = new Set<RunState>([
   "succeeded",
   "failed",
