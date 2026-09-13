@@ -176,6 +176,22 @@ const rows: Row[] = [
   allow("diff -r sub/deep src"),
   deny("rg foo confidential", /confidential/, { lists: CUSTOM }),
 
+  // A search that says what it opens is judged by that alone.
+  allow("rg -g '*.ts' API_KEY ."),
+  allow("rg --hidden -g '*.ts' API_KEY"),
+  allow("rg --hidden -g '!.env*' API_KEY"),
+  deny("rg --hidden -g '!.env' API_KEY", /reaches \.envrc/),
+  deny("rg --hidden -g '*.env' API_KEY", /reaches \.env/),
+  deny("rg --hidden -g '!.env' -g '.env' API_KEY", /reaches \.env/),
+  allow("rg -t ts foo ."),
+  allow("rg -t html foo ."),
+  deny("rg --hidden -t sh foo .", /reaches \.env/),
+  allow("grep -r --include='*.ts' KEY ."),
+  allow("grep -r --exclude='.env*' KEY ."),
+  deny("grep -r --exclude=.env KEY .", /reads \.env|reaches \.envrc/),
+  allow("rg -g '*.{ts,tsx}' foo confidential", { lists: CUSTOM }),
+  allow("rg -g '!confidential' foo .", { lists: CUSTOM }),
+
   // Read-only tools with a write or run switch, and prefix look-alikes.
   deny("sed -n 1w/tmp/x README.md", /print or filter/),
   deny("sed -n -i s/a/b/ README.md", /print or filter/),
