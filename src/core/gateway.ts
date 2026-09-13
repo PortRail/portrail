@@ -103,8 +103,9 @@ export class Gateway extends EventEmitter {
   // ------------------------------------------------------------ recovery
 
   /**
-   * Called once at startup. Anything that was mid-flight when the previous
-   * process died cannot be trusted: the agent may have run the command, or not.
+   * Called once at startup by the process that owns the runs. Anything that was
+   * mid-flight when the previous process died cannot be trusted: the agent may have
+   * run the command, or not. Anything still queued never started, so it is ours to run.
    */
   recover() {
     this.store.tx(() => {
@@ -118,6 +119,7 @@ export class Gateway extends EventEmitter {
       for (const operation of this.store.list<OperationRecord>("operation"))
         if (operation.state === "pending" || operation.state === "deciding")
           this.store.put("operation", { ...operation, state: "expired" });
+      this.store.afterCommit(() => void this.pump());
     });
   }
 

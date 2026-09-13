@@ -291,3 +291,24 @@ test("a second Gateway on the same store (an offline CLI command) leaves in-flig
   assert.equal(gateway.run(run.id).state, "cancelled", "the owner's result wins");
   await gateway.shutdown();
 });
+
+test("a run left queued by a previous process is dispatched when the next process recovers", async () => {
+  const { gateway, store } = testGateway({ maxConcurrent: 1 });
+  gateway.createRun({ workspace: "work", agent: "fake", prompt: script([{ hang: true }]) });
+  const second = gateway.createRun({ workspace: "work", agent: "fake", prompt: script([{ text: "later" }]) });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(gateway.run(second.id).state, "queued");
+  await gateway.shutdown();
+  assert.equal(gateway.run(second.id).state, "queued", "shutdown leaves what never started where it was");
+
+  const reborn = new Gateway(store, new Map([["fake" as const, new FakeProvider()]]), new BuiltinDecider({ allow: [], deny: [] }), {
+    maxConcurrent: 1,
+    defaultMaxSeconds: 60,
+    approvalTimeoutMs: 100,
+    maxQueued: 10,
+  });
+  reborn.recover();
+  await untilDone(reborn, second.id);
+  assert.equal(reborn.run(second.id).state, "succeeded");
+  await reborn.shutdown();
+});

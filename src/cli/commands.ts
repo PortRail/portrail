@@ -14,6 +14,7 @@ import { version } from "../runtime.ts";
 import { openTunnel, waitForDns, type TunnelKind } from "../tunnel.ts";
 import { installService, serviceInfo, uninstallService } from "../service.ts";
 import type { OperationRecord, RunRecord } from "../core/records.ts";
+import { shutdownOnce } from "./shutdown.ts";
 
 const out = (json: boolean, value: unknown, text: () => string) =>
   console.log(json ? JSON.stringify(value, null, 2) : text());
@@ -97,19 +98,26 @@ export async function start(args: ParsedArgs): Promise<number> {
         : `  WARNING: no API key — nothing can call this gateway. Run \`portrail key create local\`\n`) +
       `\nPress Ctrl+C to stop.`,
   );
-  const stop = () => {
-    console.log("\nStopping…");
-    tunnel?.close();
-    daemon
-      .close()
-      .then(() => process.exit(0))
-      .catch((error) => {
-        console.error(error.message);
-        process.exit(1);
-      });
-  };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  const stop = shutdownOnce(
+    async () => {
+      console.log("\nStopping…");
+      tunnel?.close();
+      await daemon.close();
+    },
+    (code) => process.exit(code),
+  );
+  process.on("SIGINT", () => stop(0));
+  process.on("SIGTERM", () => stop(0));
+  // A bug anywhere in the process ends it in order — runs marked unknown, lock
+  // released — instead of a bare crash that leaves both behind.
+  process.on("uncaughtException", (error) => {
+    console.error(`portrail: fatal: ${error.stack ?? error}`);
+    stop(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error(`portrail: fatal: ${(reason as Error)?.stack ?? reason}`);
+    stop(1);
+  });
   return new Promise(() => {});
 }
 
