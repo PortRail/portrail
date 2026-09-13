@@ -53,6 +53,9 @@ export const databasePath = (dataDir: string) => resolve(dataDir, "portrail.sqli
 export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon, "url">> {
   const dataDir = ensurePrivateDirectory(dataDirectory(options.home));
   const config = loadConfig(dataDir);
+  // Before the store is opened: a load failure throws, and must leave nothing open behind it.
+  const loaded = options.noExtension ? { extension: null, detail: "disabled" } : await loadExtension();
+  const extension = loaded.extension;
   const store = new Store(databasePath(dataDir));
   const keys = new Keys(store);
 
@@ -65,9 +68,6 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
     denyRead: config.decide.deny.filter((rule) => rule.startsWith("read:")).map((rule) => rule.slice("read:".length)),
   }));
   if (options.fake) providers.set("fake", new FakeProvider());
-
-  const loaded = options.noExtension ? { extension: null, detail: "disabled" } : await loadExtension();
-  const extension = loaded.extension;
 
   // Flags the core does not know belong to an extension. Without one, say so
   // plainly instead of starting as if they had been understood.

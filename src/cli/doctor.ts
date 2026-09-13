@@ -157,15 +157,20 @@ export async function collectChecks(home: string | undefined, live = false): Pro
       : "none installed — only needed to reach a laptop from the internet (cloudflared, ngrok, tailscale)",
   });
 
-  const pro = await loadExtension();
-  const status = pro.extension?.status?.(dir) ?? { active: !!pro.extension, detail: "" };
-  checks.push({
-    name: "Portrail Pro",
-    ok: true,
-    detail: pro.extension
-      ? `${pro.detail}${status.detail ? ` — ${status.detail}` : ""}${status.active ? " — rule engine, approvals, audit, webhooks" : " — running with the built-in allow/deny list"}`
-      : `${pro.detail} — built-in allow/deny list`,
-  });
+  try {
+    const pro = await loadExtension();
+    const status = pro.extension?.status?.(dir) ?? { active: !!pro.extension, detail: "" };
+    checks.push({
+      name: "Portrail Pro",
+      ok: true,
+      detail: pro.extension
+        ? `${pro.detail}${status.detail ? ` — ${status.detail}` : ""}${status.active ? " — rule engine, approvals, audit, webhooks" : " — running with the built-in allow/deny list"}`
+        : `${pro.detail} — built-in allow/deny list`,
+    });
+  } catch (error) {
+    // A present extension that cannot load stops `portrail start`; say so here first.
+    checks.push({ name: "Portrail Pro", ok: false, detail: (error as Error).message });
+  }
 
   return checks;
 }
