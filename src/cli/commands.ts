@@ -11,7 +11,7 @@ import { databasePath, runningDaemon, startDaemon } from "../daemon.ts";
 import { Store } from "../store/index.ts";
 import { dataDirectory, ensurePrivateDirectory } from "../store/paths.ts";
 import { version } from "../runtime.ts";
-import { openTunnel, waitForDns, type TunnelKind } from "../tunnel.ts";
+import { isTunnelKind, openTunnel, TUNNEL_KINDS, waitForDns } from "../tunnel.ts";
 import { installService, serviceInfo, uninstallService } from "../service.ts";
 import type { OperationRecord, RunRecord } from "../core/records.ts";
 import { shutdownOnce } from "./shutdown.ts";
@@ -56,11 +56,25 @@ function describeRules(daemon: { extension: { name: string; version: string; sta
   return status.active ? `${name}${status.detail ? ` (${status.detail})` : ""}` : `built-in allow/deny list — ${name} is inactive: ${status.detail}`;
 }
 
-export async function start(args: ParsedArgs): Promise<number> {
+/** What `start` reaches out to; tests swap these for stand-ins. */
+export interface StartDeps {
+  startDaemon: typeof startDaemon;
+  openTunnel: typeof openTunnel;
+  waitForDns: typeof waitForDns;
+}
+
+export async function start(args: ParsedArgs, deps: StartDeps = { startDaemon, openTunnel, waitForDns }): Promise<number> {
   const known = new Set(["home", "host", "port", "insecure", "with-fake-agent", "tunnel", "json"]);
   const extensionOptions: Record<string, string | boolean> = {};
   for (const [flag, value] of args.flags) if (!known.has(flag)) extensionOptions[flag] = value;
-  const daemon = await startDaemon({
+
+  // Check what can be checked before the daemon exists: a typo here must not leave a lock behind.
+  const tunnelFlag = args.flags.get("tunnel");
+  const kind = tunnelFlag === undefined ? null : tunnelFlag === true ? "cloudflare" : tunnelFlag;
+  if (kind !== null && !isTunnelKind(kind))
+    throw new PortrailError(400, "INVALID_REQUEST", `Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`);
+
+  const daemon = await deps.startDaemon({
     home: flagString(args, "home"),
     host: flagString(args, "host"),
     port: flagNumber(args, "port"),
@@ -72,16 +86,21 @@ export async function start(args: ParsedArgs): Promise<number> {
   const ready = agents.filter((agent) => agent.ready).map((agent) => agent.id);
 
   let tunnel: Awaited<ReturnType<typeof openTunnel>> | null = null;
-  const tunnelFlag = args.flags.get("tunnel");
-  if (tunnelFlag) {
-    const kind = (tunnelFlag === true ? "cloudflare" : tunnelFlag) as TunnelKind;
-    process.stdout.write(`Opening ${kind} tunnel… `);
-    tunnel = await openTunnel(kind, Number(new URL(daemon.url).port));
-    process.stdout.write(`${tunnel.url}\nWaiting for DNS to propagate… `);
-    const reachable = await waitForDns(tunnel.url, {
-      onTick: (elapsed) => process.stdout.write(elapsed % 10_000 < 2000 ? "." : ""),
-    });
-    console.log(reachable ? "reachable." : "still not resolving after 90s — it usually appears within a minute; try again shortly.");
+  if (kind) {
+    try {
+      process.stdout.write(`Opening ${kind} tunnel… `);
+      tunnel = await deps.openTunnel(kind, Number(new URL(daemon.url).port));
+      process.stdout.write(`${tunnel.url}\nWaiting for DNS to propagate… `);
+      const reachable = await deps.waitForDns(tunnel.url, {
+        onTick: (elapsed) => process.stdout.write(elapsed % 10_000 < 2000 ? "." : ""),
+      });
+      console.log(reachable ? "reachable." : "still not resolving after 90s — it usually appears within a minute; try again shortly.");
+    } catch (error) {
+      // No tunnel, no daemon: a half-started gateway nobody can reach helps nobody.
+      tunnel?.close();
+      await daemon.close();
+      throw error;
+    }
   }
 
   console.log(
