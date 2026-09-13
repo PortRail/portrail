@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { Resolver } from "node:dns/promises";
+import { StringDecoder } from "node:string_decoder";
 import { findExecutable } from "./providers/detect.ts";
 
 export type TunnelKind = "cloudflare" | "ngrok" | "tailscale";
@@ -91,7 +92,10 @@ export function openTunnel(
         : /(https:\/\/[a-z0-9.-]+\.ts\.net[^\s]*)/;
 
   return new Promise<Tunnel>((resolve, reject) => {
+    let settled = false;
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       child.kill();
       reject(
         new Error(
@@ -99,32 +103,52 @@ export function openTunnel(
         ),
       );
     }, options.timeoutMs ?? 30_000);
-    let settled = false;
-    const handle = (chunk: Buffer) => {
-      for (const line of chunk.toString("utf8").split("\n")) {
-        if (!line.trim()) continue;
-        options.onLog?.(line);
-        const match = line.match(pattern);
-        if (match && !settled) {
-          settled = true;
-          clearTimeout(timer);
-          const url = (match[1] ?? match[0]).replace(/\/$/, "");
-          resolve({ kind, url, close: () => child.kill() });
-        }
+    const consider = (line: string) => {
+      if (!line.trim()) return;
+      options.onLog?.(line);
+      const match = line.match(pattern);
+      if (match && !settled) {
+        settled = true;
+        clearTimeout(timer);
+        const url = (match[1] ?? match[0]).replace(/\/$/, "");
+        resolve({ kind, url, close: () => child.kill() });
       }
     };
-    child.stdout?.on("data", handle);
-    child.stderr?.on("data", handle);
+    // The tool writes when it likes: a URL may straddle two chunks, and so may one
+    // character. Decode and cut into lines per stream; the tail waits for its newline.
+    const lines = (stream: NodeJS.ReadableStream | null | undefined) => {
+      const decoder = new StringDecoder("utf8");
+      let rest = "";
+      stream?.on("data", (chunk: Buffer) => {
+        const parts = (rest + decoder.write(chunk)).split("\n");
+        rest = parts.pop() ?? "";
+        for (const line of parts) consider(line);
+      });
+      return () => {
+        consider(rest + decoder.end());
+        rest = "";
+      };
+    };
+    const flushOut = lines(child.stdout);
+    const flushErr = lines(child.stderr);
     child.on("error", (error) => {
       clearTimeout(timer);
-      if (!settled) reject(error);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
     });
-    child.on("exit", (code) => {
+    // "close" fires after both pipes have drained, "exit" may not — flush there.
+    child.on("close", (code) => {
+      flushOut();
+      flushErr();
       clearTimeout(timer);
-      if (!settled)
+      if (!settled) {
+        settled = true;
         reject(
           new Error(`${spec.binary} exited with code ${code} before reporting a URL.`),
         );
+      }
     });
   });
 }
