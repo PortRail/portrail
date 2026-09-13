@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { Gateway } from "../src/core/gateway.ts";
 import { FakeProvider } from "../src/providers/fake/index.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
@@ -64,14 +65,16 @@ test("denied operations do not run, and the decision is recorded with its rule",
 
 test("a path outside the workspace is refused before any rule is consulted", async () => {
   const calls: string[] = [];
+  let seenRoot = "";
   const spy: Decider = {
     name: "spy",
-    decide: async (op) => {
+    decide: async (op, context) => {
       calls.push(op.kind);
+      seenRoot = context.workspaceRoot;
       return { verdict: "allow", reason: "spy allows all" };
     },
   };
-  const { gateway, events } = testGateway({ decider: spy });
+  const { gateway, events, root } = testGateway({ decider: spy });
   const run = gateway.createRun({
     workspace: "work",
     agent: "fake",
@@ -84,6 +87,7 @@ test("a path outside the workspace is refused before any rule is consulted", asy
   assert.equal(decided[1]?.data.decidedBy, "portrail:containment");
   assert.equal(decided[2]?.data.decidedBy, "spy");
   assert.deepEqual(calls, ["write"], "the decider only ever saw the in-workspace operation");
+  assert.equal(seenRoot, realpathSync.native(root), "the decider sees the workspace root as the filesystem spells it");
   await gateway.shutdown();
 });
 

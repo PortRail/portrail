@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalPath, containOperation, refuseWorkspaceRoot } from "../src/core/gateway.ts";
 import { globToRegExp } from "../src/decide/match.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import type { Operation } from "../src/types.ts";
+import type { Operation, ReadOperation } from "../src/types.ts";
 
 const base = { id: "op", sessionId: "s", runId: "r", workspaceId: "w", agent: "codex" as const, requestedAt: "" };
 const realTmp = (prefix: string) => mkdtempSync(join(tmpdir(), prefix));
@@ -30,6 +30,22 @@ test("a dangling symlink pointing outside the workspace is refused, and a symlin
   const canonical = canonicalPath(root, "hooksesc/hooks/pre-commit");
   assert.ok(canonical.endsWith("/.git/hooks/pre-commit"));
 });
+
+{
+  // On a case-insensitive filesystem the agent may spell a path any way it likes;
+  // what it opens is the file on disk, and that spelling is what the rules must see.
+  const root = realTmp("ws-");
+  mkdirSync(join(root, "Sub"));
+  writeFileSync(join(root, "Sub", "File.txt"), "");
+  const caseInsensitive = existsSync(join(root, "SUB"));
+  test("a path is judged by its spelling on disk", { skip: !caseInsensitive && "case-sensitive filesystem" }, () => {
+    const read: Operation = { ...base, kind: "read", paths: [join(root, "sub", "file.txt")] };
+    const contained = containOperation(read, root.toUpperCase());
+    assert.equal(contained.refused, null);
+    assert.ok((contained.operation as ReadOperation).paths[0]!.endsWith("/Sub/File.txt"), (contained.operation as ReadOperation).paths[0]);
+    assert.equal(contained.root, realpathSync.native(root));
+  });
+}
 
 test("path rules ignore case, because the filesystem does", () => {
   assert.ok(globToRegExp(".env*", true).test(".ENV.local"));
