@@ -47,16 +47,10 @@
                 "type": "object"
               }
             },
-            "required": [
-              "code",
-              "message",
-              "retryable"
-            ]
+            "required": ["code", "message", "retryable"]
           }
         },
-        "required": [
-          "error"
-        ]
+        "required": ["error"]
       },
       "Run": {
         "type": "object",
@@ -82,10 +76,7 @@
             ]
           },
           "model": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "prompt": {
             "type": "string"
@@ -94,25 +85,16 @@
             "type": "string"
           },
           "startedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "completedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "deadlineAt": {
             "type": "string"
           },
           "summary": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "cancellationRequested": {
             "type": "boolean"
@@ -127,10 +109,7 @@
                 "type": "integer"
               },
               "costUsd": {
-                "type": [
-                  "number",
-                  "null"
-                ]
+                "type": ["number", "null"]
               }
             }
           },
@@ -154,12 +133,7 @@
                 "type": "integer"
               }
             },
-            "required": [
-              "total",
-              "allowed",
-              "denied",
-              "asked"
-            ]
+            "required": ["total", "allowed", "denied", "asked"]
           }
         },
         "required": [
@@ -179,10 +153,7 @@
         "properties": {
           "agent": {
             "type": "string",
-            "enum": [
-              "codex",
-              "claude"
-            ]
+            "enum": ["codex", "claude"]
           },
           "workspace": {
             "type": "string"
@@ -217,9 +188,7 @@
             "description": "Free-form fields stored on the run and returned with it; Portrail Pro reads `callback` from here too."
           }
         },
-        "required": [
-          "prompt"
-        ]
+        "required": ["prompt"]
       },
       "Session": {
         "type": "object",
@@ -235,17 +204,10 @@
           },
           "state": {
             "type": "string",
-            "enum": [
-              "open",
-              "closed",
-              "attention_required"
-            ]
+            "enum": ["open", "closed", "attention_required"]
           },
           "nativeSessionId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "lastEventSeq": {
             "type": "integer"
@@ -274,11 +236,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "name",
-          "root"
-        ]
+        "required": ["id", "name", "root"]
       },
       "Agent": {
         "type": "object",
@@ -293,19 +251,11 @@
             "type": "boolean"
           },
           "version": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "authMode": {
             "type": "string",
-            "enum": [
-              "subscription",
-              "api_key",
-              "none",
-              "unknown"
-            ]
+            "enum": ["subscription", "api_key", "none", "unknown"]
           },
           "detail": {
             "type": "string"
@@ -340,42 +290,25 @@
           },
           "state": {
             "type": "string",
-            "enum": [
-              "deciding",
-              "pending",
-              "decided",
-              "expired"
-            ]
+            "enum": ["deciding", "pending", "decided", "expired"]
           },
           "operation": {
             "type": "object"
           },
           "decision": {
-            "type": [
-              "object",
-              "null"
-            ]
+            "type": ["object", "null"]
           },
           "decidedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "decidedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "createdAt": {
             "type": "string"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         }
       },
@@ -389,10 +322,7 @@
             "type": "string"
           },
           "runId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "seq": {
             "type": "integer"
@@ -407,14 +337,7 @@
             "type": "object"
           }
         },
-        "required": [
-          "schemaVersion",
-          "sessionId",
-          "seq",
-          "type",
-          "timestamp",
-          "data"
-        ]
+        "required": ["schemaVersion", "sessionId", "seq", "type", "timestamp", "data"]
       },
       "Key": {
         "type": "object",
@@ -435,22 +358,13 @@
             "type": "string"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "revokedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "tokenPreview": {
             "type": "string"
@@ -474,16 +388,11 @@
             }
           },
           "expiresInDays": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": ["integer", "null"]
           },
           "policy": {}
         },
-        "required": [
-          "name"
-        ]
+        "required": ["name"]
       }
     }
   },
@@ -510,10 +419,7 @@
                       "type": "array"
                     },
                     "pro": {
-                      "type": [
-                        "object",
-                        "null"
-                      ]
+                      "type": ["object", "null"]
                     }
                   }
                 }
@@ -694,10 +600,7 @@
                       "type": "integer"
                     }
                   },
-                  "required": [
-                    "items",
-                    "total"
-                  ]
+                  "required": ["items", "total"]
                 }
               }
             }
@@ -886,16 +789,11 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "verdict"
-                ],
+                "required": ["verdict"],
                 "properties": {
                   "verdict": {
                     "type": "string",
-                    "enum": [
-                      "allow",
-                      "deny"
-                    ]
+                    "enum": ["allow", "deny"]
                   },
                   "by": {
                     "type": "string",
@@ -1110,9 +1008,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "text"
-                ]
+                "required": ["text"]
               }
             }
           }
@@ -1180,10 +1076,7 @@
                       "type": "integer"
                     }
                   },
-                  "required": [
-                    "items",
-                    "total"
-                  ]
+                  "required": ["items", "total"]
                 }
               }
             }
@@ -1392,10 +1285,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "name",
-                  "root"
-                ]
+                "required": ["name", "root"]
               }
             }
           }

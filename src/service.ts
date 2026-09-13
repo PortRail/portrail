@@ -16,14 +16,20 @@ export interface ServiceInfo {
 
 function unitPath(platform: NodeJS.Platform): string {
   const home = homedir();
-  if (platform === "darwin") return join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
+  if (platform === "darwin")
+    return join(home, "Library", "LaunchAgents", `${LABEL}.plist`);
   const base = process.env.XDG_CONFIG_HOME ?? join(home, ".config");
   return join(base, "systemd", "user", "portrail.service");
 }
 
-export function serviceInfo(platform: NodeJS.Platform = process.platform, dataDir: string = defaultDataDir()): ServiceInfo {
+export function serviceInfo(
+  platform: NodeJS.Platform = process.platform,
+  dataDir: string = defaultDataDir(),
+): ServiceInfo {
   if (platform !== "darwin" && platform !== "linux")
-    throw new Error(`Running Portrail as a service is supported on macOS and Linux, not ${platform}.`);
+    throw new Error(
+      `Running Portrail as a service is supported on macOS and Linux, not ${platform}.`,
+    );
   const path = unitPath(platform);
   return {
     platform,
@@ -45,7 +51,8 @@ function escapeXml(value: string) {
 }
 
 /** One systemd token: double-quoted, with backslash, quote and the specifier character escaped. */
-export const systemdQuote = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
+export const systemdQuote = (value: string) =>
+  `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%")}"`;
 
 export interface UnitInput {
   node: string;
@@ -101,7 +108,10 @@ ${input.args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join("\n")}
  * Write the unit and start it. The unit runs the same `portrail start` a person
  * would, with the same data directory, so nothing behaves differently as a service.
  */
-export function installService(options: { dataDir: string; extraArgs?: string[] }): ServiceInfo {
+export function installService(options: {
+  dataDir: string;
+  extraArgs?: string[];
+}): ServiceInfo {
   const info = serviceInfo(process.platform, options.dataDir);
   const input: UnitInput = {
     node: process.execPath,
@@ -113,18 +123,26 @@ export function installService(options: { dataDir: string; extraArgs?: string[] 
   mkdirSync(join(info.unitPath, ".."), { recursive: true });
 
   if (info.platform === "darwin") {
-    writeFileSync(info.unitPath, renderLaunchdPlist({ ...input, home: homedir() }), { mode: 0o600 });
+    writeFileSync(info.unitPath, renderLaunchdPlist({ ...input, home: homedir() }), {
+      mode: 0o600,
+    });
     const domain = `gui/${process.getuid?.() ?? 501}`;
     try {
-      execFileSync("launchctl", ["bootout", domain, info.unitPath], { stdio: "ignore" });
+      execFileSync("launchctl", ["bootout", domain, info.unitPath], {
+        stdio: "ignore",
+      });
     } catch {
       // Not loaded yet.
     }
-    execFileSync("launchctl", ["bootstrap", domain, info.unitPath], { stdio: "inherit" });
+    execFileSync("launchctl", ["bootstrap", domain, info.unitPath], {
+      stdio: "inherit",
+    });
   } else {
     writeFileSync(info.unitPath, renderSystemdUnit(input), { mode: 0o600 });
     execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
-    execFileSync("systemctl", ["--user", "enable", "--now", "portrail"], { stdio: "inherit" });
+    execFileSync("systemctl", ["--user", "enable", "--now", "portrail"], {
+      stdio: "inherit",
+    });
   }
   return serviceInfo(process.platform, options.dataDir);
 }
@@ -134,13 +152,19 @@ export function uninstallService(dataDir: string = defaultDataDir()): ServiceInf
   if (!info.installed) return info;
   if (info.platform === "darwin") {
     try {
-      execFileSync("launchctl", ["bootout", `gui/${process.getuid?.() ?? 501}`, info.unitPath], { stdio: "ignore" });
+      execFileSync(
+        "launchctl",
+        ["bootout", `gui/${process.getuid?.() ?? 501}`, info.unitPath],
+        { stdio: "ignore" },
+      );
     } catch {
       // Already stopped.
     }
   } else {
     try {
-      execFileSync("systemctl", ["--user", "disable", "--now", "portrail"], { stdio: "ignore" });
+      execFileSync("systemctl", ["--user", "disable", "--now", "portrail"], {
+        stdio: "ignore",
+      });
     } catch {
       // Already stopped.
     }
@@ -148,4 +172,3 @@ export function uninstallService(dataDir: string = defaultDataDir()): ServiceInf
   unlinkSync(info.unitPath);
   return serviceInfo(process.platform, dataDir);
 }
-

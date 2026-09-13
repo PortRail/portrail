@@ -30,7 +30,7 @@ That request returns when the agent is done, with what it did and what it said.
   login you already have. No API keys for the agents, no copied credentials.
 - **Every action goes through one decision point.** Each command and file change the
   agent proposes is checked against your rules before it starts. A refused operation is
-  never started, and the agent is told why. What an *allowed* operation then does is the
+  never started, and the agent is told why. What an _allowed_ operation then does is the
   agent's — and its sandbox's — business, not Portrail's.
 - **A real API.** Runs, sessions, resumable event streams, cancel, steer, `wait` for
   synchronous callers, idempotency keys for automations that retry.
@@ -45,7 +45,7 @@ That request returns when the agent is done, with what it did and what it said.
 
 Both agents ask permission before acting. Codex sends a request over its app-server
 protocol; Claude Code calls a hook. Portrail answers those questions from your rules,
-which means it governs what the agent *does* without being a sandbox around it.
+which means it governs what the agent _does_ without being a sandbox around it.
 
 ```
                 ┌──────────────┐    "may I run npm test?"    ┌───────────┐

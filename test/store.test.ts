@@ -93,9 +93,6 @@ test("events increment per session and replay from a cursor", () => {
 
 test("a synchronous-only transaction refuses a promise", () => {
   const store = new Store(":memory:");
-  assert.throws(
-    () => store.tx((): any => Promise.resolve(1)),
-    /synchronous/,
-  );
+  assert.throws(() => store.tx((): any => Promise.resolve(1)), /synchronous/);
   store.close();
 });

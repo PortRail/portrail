@@ -79,8 +79,14 @@ async function main(): Promise<number> {
       const { extension } = await loadExtension();
       const command = extension?.commands?.[args.command];
       if (command) {
-        const { dataDirectory, ensurePrivateDirectory } = await import("../store/paths.ts");
-        return command.run({ positional: args.positional, flags: args.flags, dataDir: ensurePrivateDirectory(dataDirectory(home)) });
+        const { dataDirectory, ensurePrivateDirectory } = await import(
+          "../store/paths.ts"
+        );
+        return command.run({
+          positional: args.positional,
+          flags: args.flags,
+          dataDir: ensurePrivateDirectory(dataDirectory(home)),
+        });
       }
       throw new PortrailError(
         400,

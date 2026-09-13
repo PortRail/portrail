@@ -36,7 +36,11 @@ function offline(home: string | undefined) {
 }
 
 /** A gateway with no providers: enough for workspace admin, never dispatches. */
-export function adminGateway(store: Store, config: PortrailConfig, dataDir: string): Gateway {
+export function adminGateway(
+  store: Store,
+  config: PortrailConfig,
+  dataDir: string,
+): Gateway {
   return new Gateway(store, new Map(), new BuiltinDecider(config.decide), {
     dataDir,
     maxConcurrent: 0,
@@ -49,11 +53,23 @@ export function adminGateway(store: Store, config: PortrailConfig, dataDir: stri
 // ---------------------------------------------------------------- start
 
 /** Who decides: the extension when it is active, the built-in list otherwise — and why. */
-function describeRules(daemon: { extension: { name: string; version: string; status?(dataDir: string): { active: boolean; detail: string } } | null; dataDir: string }): string {
+function describeRules(daemon: {
+  extension: {
+    name: string;
+    version: string;
+    status?(dataDir: string): { active: boolean; detail: string };
+  } | null;
+  dataDir: string;
+}): string {
   if (!daemon.extension) return "built-in allow/deny list";
-  const status = daemon.extension.status?.(daemon.dataDir) ?? { active: true, detail: "" };
+  const status = daemon.extension.status?.(daemon.dataDir) ?? {
+    active: true,
+    detail: "",
+  };
   const name = `${daemon.extension.name} ${daemon.extension.version}`;
-  return status.active ? `${name}${status.detail ? ` (${status.detail})` : ""}` : `built-in allow/deny list — ${name} is inactive: ${status.detail}`;
+  return status.active
+    ? `${name}${status.detail ? ` (${status.detail})` : ""}`
+    : `built-in allow/deny list — ${name} is inactive: ${status.detail}`;
 }
 
 /** What `start` reaches out to; tests swap these for stand-ins. */
@@ -63,16 +79,33 @@ export interface StartDeps {
   waitForDns: typeof waitForDns;
 }
 
-export async function start(args: ParsedArgs, deps: StartDeps = { startDaemon, openTunnel, waitForDns }): Promise<number> {
-  const known = new Set(["home", "host", "port", "insecure", "with-fake-agent", "tunnel", "json"]);
+export async function start(
+  args: ParsedArgs,
+  deps: StartDeps = { startDaemon, openTunnel, waitForDns },
+): Promise<number> {
+  const known = new Set([
+    "home",
+    "host",
+    "port",
+    "insecure",
+    "with-fake-agent",
+    "tunnel",
+    "json",
+  ]);
   const extensionOptions: Record<string, string | boolean> = {};
-  for (const [flag, value] of args.flags) if (!known.has(flag)) extensionOptions[flag] = value;
+  for (const [flag, value] of args.flags)
+    if (!known.has(flag)) extensionOptions[flag] = value;
 
   // Check what can be checked before the daemon exists: a typo here must not leave a lock behind.
   const tunnelFlag = args.flags.get("tunnel");
-  const kind = tunnelFlag === undefined ? null : tunnelFlag === true ? "cloudflare" : tunnelFlag;
+  const kind =
+    tunnelFlag === undefined ? null : tunnelFlag === true ? "cloudflare" : tunnelFlag;
   if (kind !== null && !isTunnelKind(kind))
-    throw new PortrailError(400, "INVALID_REQUEST", `Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`);
+    throw new PortrailError(
+      400,
+      "INVALID_REQUEST",
+      `Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`,
+    );
 
   const daemon = await deps.startDaemon({
     home: flagString(args, "home"),
@@ -94,7 +127,11 @@ export async function start(args: ParsedArgs, deps: StartDeps = { startDaemon, o
       const reachable = await deps.waitForDns(tunnel.url, {
         onTick: (elapsed) => process.stdout.write(elapsed % 10_000 < 2000 ? "." : ""),
       });
-      console.log(reachable ? "reachable." : "still not resolving after 90s — it usually appears within a minute; try again shortly.");
+      console.log(
+        reachable
+          ? "reachable."
+          : "still not resolving after 90s — it usually appears within a minute; try again shortly.",
+      );
     } catch (error) {
       // No tunnel, no daemon: a half-started gateway nobody can reach helps nobody.
       tunnel?.close();
@@ -105,7 +142,9 @@ export async function start(args: ParsedArgs, deps: StartDeps = { startDaemon, o
 
   console.log(
     `Portrail ${version} listening on ${daemon.url}\n` +
-      (tunnel ? `  public:  ${tunnel.url}  (${tunnel.kind} tunnel — API keys still required)\n` : "") +
+      (tunnel
+        ? `  public:  ${tunnel.url}  (${tunnel.kind} tunnel — API keys still required)\n`
+        : "") +
       `  data:    ${daemon.dataDir}\n` +
       `  agents:  ${ready.length ? ready.join(", ") : "none ready — run \`portrail doctor\`"}\n` +
       `  rules:   ${describeRules(daemon)}\n` +
@@ -147,25 +186,47 @@ export async function status(args: ParsedArgs): Promise<number> {
   const dataDir = dataDirectory(flagString(args, "home"));
   const running = runningDaemon(dataDir);
   if (!running) {
-    out(json, { running: false, dataDir }, () => `Portrail is not running (data: ${dataDir}).`);
+    out(
+      json,
+      { running: false, dataDir },
+      () => `Portrail is not running (data: ${dataDir}).`,
+    );
     return 1;
   }
   try {
-    const response = await fetch(`${running.url}/health`, { signal: AbortSignal.timeout(3000) });
+    const response = await fetch(`${running.url}/health`, {
+      signal: AbortSignal.timeout(3000),
+    });
     const health = (await response.json()) as Record<string, unknown>;
     const local = new LocalAnswers(running);
-    const waiting = local.available ? await local.pending().then((r) => r.items).catch(() => []) : [];
+    const waiting = local.available
+      ? await local
+          .pending()
+          .then((r) => r.items)
+          .catch(() => [])
+      : [];
     const { localToken: _secret, ...visible } = running;
     void _secret;
     out(json, { running: true, ...visible, ...health, waiting }, () => {
       const agents = (health.agents as Array<{ id: string; ready: boolean }>) ?? [];
-      const pro = health.pro as { name: string; version: string; active?: boolean; detail?: string } | null;
+      const pro = health.pro as {
+        name: string;
+        version: string;
+        active?: boolean;
+        detail?: string;
+      } | null;
       return (
         `Portrail ${health.version} running at ${running.url} (pid ${running.pid})\n` +
         `  agents: ${agents.map((agent) => `${agent.id}${agent.ready ? "" : " (not ready)"}`).join(", ") || "none"}\n` +
         `  pro:    ${pro ? `${pro.name} ${pro.version}${pro.detail ? ` (${pro.detail})` : ""}` : "not installed"}` +
         (waiting.length
-          ? `\n  waiting for your answer:\n` + waiting.map((op) => `    ${op.id}  ${describeOperation(op.operation)}\n      portrail approve ${op.id}   |   portrail deny ${op.id}`).join("\n")
+          ? `\n  waiting for your answer:\n` +
+            waiting
+              .map(
+                (op) =>
+                  `    ${op.id}  ${describeOperation(op.operation)}\n      portrail approve ${op.id}   |   portrail deny ${op.id}`,
+              )
+              .join("\n")
           : "")
       );
     });
@@ -173,7 +234,12 @@ export async function status(args: ParsedArgs): Promise<number> {
   } catch (error) {
     const { localToken: _stale, ...visible } = running;
     void _stale;
-    out(json, { running: false, stale: true, ...visible }, () => `A daemon record exists but ${running.url} did not answer: ${(error as Error).message}`);
+    out(
+      json,
+      { running: false, stale: true, ...visible },
+      () =>
+        `A daemon record exists but ${running.url} did not answer: ${(error as Error).message}`,
+    );
     return 1;
   }
 }
@@ -187,16 +253,30 @@ export async function key(args: ParsedArgs): Promise<number> {
   try {
     switch (action) {
       case "create": {
-        if (!name) throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail key create <name> [--scopes a,b] [--expires 90]");
-        const scopes = flagString(args, "scopes")?.split(",").map((scope) => scope.trim());
+        if (!name)
+          throw new PortrailError(
+            400,
+            "INVALID_REQUEST",
+            "Usage: portrail key create <name> [--scopes a,b] [--expires 90]",
+          );
+        const scopes = flagString(args, "scopes")
+          ?.split(",")
+          .map((scope) => scope.trim());
         const expires = flagNumber(args, "expires");
-        const { key, token } = ctx.keys.create({ name, scopes, expiresInDays: expires ?? null });
-        out(json, { ...publicKey(key), token }, () =>
-          `Created key "${key.name}" (${key.id})\n` +
-          `  scopes:  ${key.scopes.join(", ")}\n` +
-          `  expires: ${key.expiresAt ?? "never"}\n\n` +
-          `  ${token}\n\n` +
-          `This is the only time the token is shown. Store it somewhere safe.`,
+        const { key, token } = ctx.keys.create({
+          name,
+          scopes,
+          expiresInDays: expires ?? null,
+        });
+        out(
+          json,
+          { ...publicKey(key), token },
+          () =>
+            `Created key "${key.name}" (${key.id})\n` +
+            `  scopes:  ${key.scopes.join(", ")}\n` +
+            `  expires: ${key.expiresAt ?? "never"}\n\n` +
+            `  ${token}\n\n` +
+            `This is the only time the token is shown. Store it somewhere safe.`,
         );
         return 0;
       }
@@ -205,20 +285,32 @@ export async function key(args: ParsedArgs): Promise<number> {
         out(json, { items: keys }, () =>
           keys.length
             ? keys
-                .map((key) => `${key.revokedAt ? "revoked " : "active  "} ${key.id}  ${key.name.padEnd(20)} ${key.scopes.join(",")}  ${key.lastUsedAt ? `used ${key.lastUsedAt}` : "never used"}`)
+                .map(
+                  (key) =>
+                    `${key.revokedAt ? "revoked " : "active  "} ${key.id}  ${key.name.padEnd(20)} ${key.scopes.join(",")}  ${key.lastUsedAt ? `used ${key.lastUsedAt}` : "never used"}`,
+                )
                 .join("\n")
             : "No keys yet. Create one with `portrail key create <name>`.",
         );
         return 0;
       }
       case "revoke": {
-        if (!name) throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail key revoke <id>");
+        if (!name)
+          throw new PortrailError(
+            400,
+            "INVALID_REQUEST",
+            "Usage: portrail key revoke <id>",
+          );
         const revoked = ctx.keys.revoke(name);
         out(json, publicKey(revoked), () => `Revoked ${revoked.name} (${revoked.id}).`);
         return 0;
       }
       default:
-        throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail key create|list|revoke");
+        throw new PortrailError(
+          400,
+          "INVALID_REQUEST",
+          "Usage: portrail key create|list|revoke",
+        );
     }
   } finally {
     ctx.close();
@@ -234,9 +326,17 @@ export async function workspace(args: ParsedArgs): Promise<number> {
   try {
     switch (action) {
       case "add": {
-        if (!target) throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail workspace add <path> [--name project]");
+        if (!target)
+          throw new PortrailError(
+            400,
+            "INVALID_REQUEST",
+            "Usage: portrail workspace add <path> [--name project]",
+          );
         const root = resolve(target);
-        const name = flagString(args, "name") ?? root.split("/").filter(Boolean).pop() ?? "workspace";
+        const name =
+          flagString(args, "name") ??
+          root.split("/").filter(Boolean).pop() ??
+          "workspace";
         const created = ctx.gateway.addWorkspace({ name, root });
         out(json, created, () => `Added workspace "${created.name}" → ${created.root}`);
         return 0;
@@ -245,19 +345,30 @@ export async function workspace(args: ParsedArgs): Promise<number> {
         const items = ctx.gateway.listWorkspaces();
         out(json, { items }, () =>
           items.length
-            ? items.map((workspace) => `${workspace.name.padEnd(20)} ${workspace.root}`).join("\n")
+            ? items
+                .map((workspace) => `${workspace.name.padEnd(20)} ${workspace.root}`)
+                .join("\n")
             : "No workspaces yet. Add one with `portrail workspace add <path>`.",
         );
         return 0;
       }
       case "remove": {
-        if (!target) throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail workspace remove <name>");
+        if (!target)
+          throw new PortrailError(
+            400,
+            "INVALID_REQUEST",
+            "Usage: portrail workspace remove <name>",
+          );
         ctx.gateway.removeWorkspace(target);
         out(json, { removed: target }, () => `Removed workspace "${target}".`);
         return 0;
       }
       default:
-        throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail workspace add|list|remove");
+        throw new PortrailError(
+          400,
+          "INVALID_REQUEST",
+          "Usage: portrail workspace add|list|remove",
+        );
     }
   } finally {
     ctx.close();
@@ -270,19 +381,39 @@ export async function workspace(args: ParsedArgs): Promise<number> {
 export async function run(args: ParsedArgs): Promise<number> {
   const json = flagBool(args, "json");
   const prompt = args.positional.join(" ");
-  if (!prompt) throw new PortrailError(400, "INVALID_REQUEST", 'Usage: portrail run "<prompt>" [--workspace name] [--agent codex|claude]');
+  if (!prompt)
+    throw new PortrailError(
+      400,
+      "INVALID_REQUEST",
+      'Usage: portrail run "<prompt>" [--workspace name] [--agent codex|claude]',
+    );
   const dataDir = dataDirectory(flagString(args, "home"));
   const running = runningDaemon(dataDir);
-  if (!running) throw new PortrailError(503, "DAEMON_NOT_RUNNING", "Portrail is not running. Start it with `portrail start`.");
+  if (!running)
+    throw new PortrailError(
+      503,
+      "DAEMON_NOT_RUNNING",
+      "Portrail is not running. Start it with `portrail start`.",
+    );
   const token = flagString(args, "key") ?? process.env.PORTRAIL_KEY;
-  if (!token) throw new PortrailError(401, "UNAUTHORIZED", "Pass --key prt_... or set PORTRAIL_KEY.");
+  if (!token)
+    throw new PortrailError(
+      401,
+      "UNAUTHORIZED",
+      "Pass --key prt_... or set PORTRAIL_KEY.",
+    );
 
   const { PortrailClient } = await import("../client/index.ts");
   const client = new PortrailClient({ baseUrl: running.url, token });
   const config = loadConfig(dataDir);
   const workspaces = await client.workspaces.list();
   const workspaceName = flagString(args, "workspace") ?? workspaces.items[0]?.name;
-  if (!workspaceName) throw new PortrailError(400, "INVALID_REQUEST", "No workspace. Add one with `portrail workspace add <path>`.");
+  if (!workspaceName)
+    throw new PortrailError(
+      400,
+      "INVALID_REQUEST",
+      "No workspace. Add one with `portrail workspace add <path>`.",
+    );
 
   const created = await client.runs.create({
     workspace: workspaceName,
@@ -290,7 +421,8 @@ export async function run(args: ParsedArgs): Promise<number> {
     prompt,
   });
   if (json) {
-    for await (const event of client.runs.events(created.id)) console.log(JSON.stringify(event));
+    for await (const event of client.runs.events(created.id))
+      console.log(JSON.stringify(event));
     const final = await client.runs.get(created.id);
     console.log(JSON.stringify(final, null, 2));
     return exitCodeFor(final);
@@ -315,7 +447,9 @@ export async function run(args: ParsedArgs): Promise<number> {
         break;
       case "approval.requested": {
         const operationId = String(event.data.operationId);
-        process.stderr.write(`\n${describeOperation(event.data.operation)}\n  ${event.data.reason ?? ""}\n`);
+        process.stderr.write(
+          `\n${describeOperation(event.data.operation)}\n  ${event.data.reason ?? ""}\n`,
+        );
         if (process.stdin.isTTY && local.available) {
           // Ask here, now, once. The stream keeps flowing underneath; the run waits.
           const verdict = await ask(`  Allow this once? [y/N] `);
@@ -326,7 +460,9 @@ export async function run(args: ParsedArgs): Promise<number> {
             process.stderr.write(`  ${(error as Error).message}\n`);
           }
         } else {
-          process.stderr.write(`  [waiting] answer from this machine with: portrail approve ${operationId}   (or portrail deny)\n`);
+          process.stderr.write(
+            `  [waiting] answer from this machine with: portrail approve ${operationId}   (or portrail deny)\n`,
+          );
         }
         break;
       }
@@ -338,16 +474,21 @@ export async function run(args: ParsedArgs): Promise<number> {
   }
   const final = await client.runs.get(created.id);
   const denied = final.operations?.denied ?? 0;
-  if (denied) process.stderr.write(`${denied} operation${denied === 1 ? " was" : "s were"} refused by your rules (exit 2).\n`);
+  if (denied)
+    process.stderr.write(
+      `${denied} operation${denied === 1 ? " was" : "s were"} refused by your rules (exit 2).\n`,
+    );
   return exitCodeFor(final);
 }
 
 /** 0: did everything asked. 2: finished, but something was refused. 1: did not finish. Same in every output mode. */
-export function exitCodeFor(run: { state: string; operations?: { denied?: number } | null }): 0 | 1 | 2 {
+export function exitCodeFor(run: {
+  state: string;
+  operations?: { denied?: number } | null;
+}): 0 | 1 | 2 {
   if (run.state !== "succeeded") return 1;
   return (run.operations?.denied ?? 0) > 0 ? 2 : 0;
 }
-
 
 // ------------------------------------------------------------- answers
 
@@ -386,19 +527,34 @@ class LocalAnswers {
   constructor(private readonly running: { url: string; localToken?: string }) {}
 
   get available() {
-    return typeof this.running.localToken === "string" && this.running.localToken.length > 0;
+    return (
+      typeof this.running.localToken === "string" && this.running.localToken.length > 0
+    );
   }
 
   private async call(method: string, path: string, body?: unknown) {
-    if (!this.available) throw new PortrailError(403, "FORBIDDEN", "This Portrail was started by an older version; restart it to answer from the terminal.");
+    if (!this.available)
+      throw new PortrailError(
+        403,
+        "FORBIDDEN",
+        "This Portrail was started by an older version; restart it to answer from the terminal.",
+      );
     const response = await fetch(`${this.running.url}${path}`, {
       method,
-      headers: { "content-type": "application/json", "x-portrail-local": this.running.localToken! },
+      headers: {
+        "content-type": "application/json",
+        "x-portrail-local": this.running.localToken!,
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
     const payload = (await response.json().catch(() => null)) as any;
-    if (!response.ok) throw new PortrailError(response.status, payload?.error?.code ?? "ERROR", payload?.error?.message ?? `HTTP ${response.status}`);
+    if (!response.ok)
+      throw new PortrailError(
+        response.status,
+        payload?.error?.code ?? "ERROR",
+        payload?.error?.message ?? `HTTP ${response.status}`,
+      );
     return payload;
   }
 
@@ -407,16 +563,28 @@ class LocalAnswers {
   }
 
   answer(operationId: string, verdict: "allow" | "deny"): Promise<OperationRecord> {
-    return this.call("POST", `/v1/operations/${encodeURIComponent(operationId)}/answer`, { verdict, by: userInfo().username });
+    return this.call(
+      "POST",
+      `/v1/operations/${encodeURIComponent(operationId)}/answer`,
+      { verdict, by: userInfo().username },
+    );
   }
 }
 
 /** `portrail approve [id]` / `portrail deny [id]` — answer a parked operation from this machine. */
-export async function answer(args: ParsedArgs, verdict: "allow" | "deny"): Promise<number> {
+export async function answer(
+  args: ParsedArgs,
+  verdict: "allow" | "deny",
+): Promise<number> {
   const json = flagBool(args, "json");
   const dataDir = dataDirectory(flagString(args, "home"));
   const running = runningDaemon(dataDir);
-  if (!running) throw new PortrailError(503, "DAEMON_NOT_RUNNING", "Portrail is not running. Start it with `portrail start`.");
+  if (!running)
+    throw new PortrailError(
+      503,
+      "DAEMON_NOT_RUNNING",
+      "Portrail is not running. Start it with `portrail start`.",
+    );
   const local = new LocalAnswers(running);
   const [given] = args.positional;
   let operationId = given;
@@ -427,13 +595,26 @@ export async function answer(args: ParsedArgs, verdict: "allow" | "deny"): Promi
       return 1;
     }
     if (items.length > 1) {
-      out(json, { items }, () => `${items.length} operations are waiting. Say which:\n` + items.map((op) => `  ${op.id}  ${describeOperation(op.operation)}`).join("\n"));
+      out(
+        json,
+        { items },
+        () =>
+          `${items.length} operations are waiting. Say which:\n` +
+          items
+            .map((op) => `  ${op.id}  ${describeOperation(op.operation)}`)
+            .join("\n"),
+      );
       return 1;
     }
     operationId = items[0]!.id;
   }
   const decided = await local.answer(operationId, verdict);
-  out(json, decided, () => `${verdict === "allow" ? "Allowed" : "Refused"} once: ${describeOperation(decided.operation)}`);
+  out(
+    json,
+    decided,
+    () =>
+      `${verdict === "allow" ? "Allowed" : "Refused"} once: ${describeOperation(decided.operation)}`,
+  );
   return 0;
 }
 
@@ -455,7 +636,12 @@ export async function service(args: ParsedArgs): Promise<number> {
         extra.push(`--${flag}`, ...(value === true ? [] : [String(value)]));
       }
       const info = installService({ dataDir, extraArgs: extra });
-      out(json, info, () => `Installed and started.\n  unit: ${info.unitPath}\n  check: ${info.hints.join("  |  ")}`);
+      out(
+        json,
+        info,
+        () =>
+          `Installed and started.\n  unit: ${info.unitPath}\n  check: ${info.hints.join("  |  ")}`,
+      );
       return 0;
     }
     case "uninstall": {
@@ -466,11 +652,19 @@ export async function service(args: ParsedArgs): Promise<number> {
     case "status":
     case undefined: {
       const info = serviceInfo(process.platform, dataDir);
-      out(json, info, () => (info.installed ? `Installed: ${info.unitPath}\n  check: ${info.hints.join("  |  ")}` : "Not installed as a service."));
+      out(json, info, () =>
+        info.installed
+          ? `Installed: ${info.unitPath}\n  check: ${info.hints.join("  |  ")}`
+          : "Not installed as a service.",
+      );
       return 0;
     }
     default:
-      throw new PortrailError(400, "INVALID_REQUEST", "Usage: portrail service install|uninstall|status");
+      throw new PortrailError(
+        400,
+        "INVALID_REQUEST",
+        "Usage: portrail service install|uninstall|status",
+      );
   }
 }
 
@@ -508,18 +702,25 @@ export async function logs(args: ParsedArgs): Promise<number> {
   // Follow: poll the store for new events across all sessions.
   const seen = new Map<string, number>();
   const tail = offline(flagString(args, "home"));
-  for (const session of tail.store.list<{ id: string; lastEventSeq: number }>("session"))
+  for (const session of tail.store.list<{ id: string; lastEventSeq: number }>(
+    "session",
+  ))
     seen.set(session.id, session.lastEventSeq);
   console.log("— following —");
   for (;;) {
-    for (const session of tail.store.list<{ id: string; lastEventSeq: number }>("session")) {
+    for (const session of tail.store.list<{ id: string; lastEventSeq: number }>(
+      "session",
+    )) {
       const after = seen.get(session.id) ?? 0;
       for (const event of tail.store.events(session.id, after, 200)) {
         seen.set(session.id, event.seq);
         if (json) console.log(JSON.stringify(event));
-        else if (event.type === "output.text") process.stdout.write(String(event.data.text ?? ""));
+        else if (event.type === "output.text")
+          process.stdout.write(String(event.data.text ?? ""));
         else if (event.type !== "output.reasoning" && event.type !== "usage")
-          console.log(`\n[${event.timestamp}] ${event.type} ${event.runId ?? ""} ${summarise(event.data)}`);
+          console.log(
+            `\n[${event.timestamp}] ${event.type} ${event.runId ?? ""} ${summarise(event.data)}`,
+          );
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 500));

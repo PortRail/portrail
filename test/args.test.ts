@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BOOLEAN_FLAGS, flagBool, flagNumber, flagString, parseArgs } from "../src/cli/args.ts";
+import {
+  BOOLEAN_FLAGS,
+  flagBool,
+  flagNumber,
+  flagString,
+  parseArgs,
+} from "../src/cli/args.ts";
 
 test("parses the command, positional arguments, and supported flag forms", () => {
   const args = parseArgs([
@@ -69,13 +75,26 @@ test("flagNumber rejects non-numeric values", () => {
 });
 
 test("a boolean flag does not swallow the token after it", () => {
-  const args = parseArgs(["run", "--json", "hello world"], { booleans: new Set(["json"]) });
+  const args = parseArgs(["run", "--json", "hello world"], {
+    booleans: new Set(["json"]),
+  });
   assert.equal(args.flags.get("json"), true);
   assert.deepEqual(args.positional, ["hello world"]);
-  const explicit = parseArgs(["run", "--json=false", "x"], { booleans: new Set(["json"]) });
+  const explicit = parseArgs(["run", "--json=false", "x"], {
+    booleans: new Set(["json"]),
+  });
   assert.equal(flagBool(explicit, "json"), false);
   assert.deepEqual(explicit.positional, ["x"]);
-  for (const flag of ["json", "live", "insecure", "with-fake-agent", "follow", "version", "help"]) assert.ok(BOOLEAN_FLAGS.has(flag), flag);
+  for (const flag of [
+    "json",
+    "live",
+    "insecure",
+    "with-fake-agent",
+    "follow",
+    "version",
+    "help",
+  ])
+    assert.ok(BOOLEAN_FLAGS.has(flag), flag);
   assert.ok(!BOOLEAN_FLAGS.has("tunnel"), "--tunnel takes an optional kind");
   const tunnel = parseArgs(["start", "--tunnel", "ngrok"], { booleans: BOOLEAN_FLAGS });
   assert.equal(tunnel.flags.get("tunnel"), "ngrok");

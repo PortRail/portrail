@@ -39,20 +39,29 @@ export interface CommandSegment {
  * This is the one parser. Containment and the decider both read from it, so what
  * one refuses the other cannot let through.
  */
-export function parseCommand(command: string): { segments: CommandSegment[]; unjudgeable: string | null } {
+export function parseCommand(command: string): {
+  segments: CommandSegment[];
+  unjudgeable: string | null;
+} {
   const trimmed = command.trim();
   const scanned = scan(trimmed);
   if (scanned.unjudgeable) return { segments: [], unjudgeable: scanned.unjudgeable };
   const segments: CommandSegment[] = [];
   for (const raw of scanned.segments) {
     const assignment = leadingAssignment(raw);
-    if (assignment.refused) return { segments: [], unjudgeable: `an environment assignment (${assignment.refused})` };
+    if (assignment.refused)
+      return {
+        segments: [],
+        unjudgeable: `an environment assignment (${assignment.refused})`,
+      };
     const words = shellSplit(assignment.rest);
     if (!words.length) continue;
     const inner = unwrap(words);
     if (inner.refused) return { segments: [], unjudgeable: inner.refused };
     const programIndex = words.length - inner.words.length;
-    const namedWords = inner.words.length ? [basename(inner.words[0]!), ...inner.words.slice(1)] : [];
+    const namedWords = inner.words.length
+      ? [basename(inner.words[0]!), ...inner.words.slice(1)]
+      : [];
     // `/usr/bin/env curl` → `env curl` → `curl`: naming the program can expose a wrapper.
     const renamed = unwrap(namedWords);
     segments.push({
@@ -64,17 +73,60 @@ export function parseCommand(command: string): { segments: CommandSegment[]; unj
       fed: inner.fed,
     });
   }
-  if (!segments.length) segments.push({ words: [trimmed], programIndex: 0, text: trimmed, unwrapped: trimmed, named: trimmed, fed: false });
+  if (!segments.length)
+    segments.push({
+      words: [trimmed],
+      programIndex: 0,
+      text: trimmed,
+      unwrapped: trimmed,
+      named: trimmed,
+      fed: false,
+    });
   return { segments, unjudgeable: null };
 }
 
 /** Shell keywords that may precede a command inside a compound. */
-const KEYWORDS = new Set(["if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"]);
+const KEYWORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "elif",
+  "while",
+  "until",
+  "do",
+  "!",
+  "{",
+  "}",
+]);
 /** Wrappers that run their argument unchanged and take no options we can judge. */
-const PLAIN_WRAPPERS = new Set(["exec", "builtin", "nohup", "time", "setsid", "unbuffer"]);
+const PLAIN_WRAPPERS = new Set([
+  "exec",
+  "builtin",
+  "nohup",
+  "time",
+  "setsid",
+  "unbuffer",
+]);
 const XARGS_WITH_VALUE = new Set([
-  "-n", "-I", "-P", "-L", "-s", "-d", "-E", "-a", "-J", "-R", "-S",
-  "--max-args", "--replace", "--max-procs", "--max-lines", "--delimiter", "--arg-file", "--max-chars", "--eof",
+  "-n",
+  "-I",
+  "-P",
+  "-L",
+  "-s",
+  "-d",
+  "-E",
+  "-a",
+  "-J",
+  "-R",
+  "-S",
+  "--max-args",
+  "--replace",
+  "--max-procs",
+  "--max-lines",
+  "--delimiter",
+  "--arg-file",
+  "--max-chars",
+  "--eof",
 ]);
 
 /**
@@ -82,7 +134,11 @@ const XARGS_WITH_VALUE = new Set([
  * deny rule for `curl` also sees `env curl`, `nohup curl`, `xargs curl`. Options that
  * would change what runs (`env -S`, `nohup -p`) are refused: a rule cannot judge them.
  */
-function unwrap(input: readonly string[]): { words: string[]; refused: string | null; fed: boolean } {
+function unwrap(input: readonly string[]): {
+  words: string[];
+  refused: string | null;
+  fed: boolean;
+} {
   let words = [...input];
   let fed = false;
   for (let guard = 0; guard < 8 && words.length; guard++) {
@@ -96,7 +152,8 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
       if (words[0]?.startsWith("-")) return { words, refused: "options to env", fed };
       while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) {
         const name = words[0]!.slice(0, words[0]!.indexOf("="));
-        if (!HARMLESS_ASSIGNMENT.test(name)) return { words, refused: `an environment assignment (${name})`, fed };
+        if (!HARMLESS_ASSIGNMENT.test(name))
+          return { words, refused: `an environment assignment (${name})`, fed };
         words.shift();
       }
       continue;
@@ -110,7 +167,8 @@ function unwrap(input: readonly string[]): { words: string[]; refused: string | 
     }
     if (PLAIN_WRAPPERS.has(head)) {
       words.shift();
-      if (words[0]?.startsWith("-")) return { words, refused: `options to ${head}`, fed };
+      if (words[0]?.startsWith("-"))
+        return { words, refused: `options to ${head}`, fed };
       continue;
     }
     if (head === "nice") {
@@ -162,7 +220,8 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
     current = "";
   };
   // A `$` that expands: anything but a bare `$` before whitespace, the end, or a closing quote.
-  const expands = (next: string, closing: string) => next !== "" && next !== closing && !/\s/.test(next);
+  const expands = (next: string, closing: string) =>
+    next !== "" && next !== closing && !/\s/.test(next);
   for (let index = 0; index < line.length; index++) {
     const char = line[index]!;
     const next = line[index + 1] ?? "";
@@ -181,8 +240,10 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
         index++;
         continue;
       }
-      if (char === "`" || (char === "$" && next === "(")) return { segments, unjudgeable: "command substitution" };
-      if (char === "$" && expands(next, '"')) return { segments, unjudgeable: "variable expansion" };
+      if (char === "`" || (char === "$" && next === "("))
+        return { segments, unjudgeable: "command substitution" };
+      if (char === "$" && expands(next, '"'))
+        return { segments, unjudgeable: "variable expansion" };
       if (char === '"') quote = null;
       current += char;
       continue;
@@ -203,29 +264,40 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
       current += char;
       continue;
     }
-    if (char === "`" || (char === "$" && next === "(") || (char === "<" && next === "(")) return { segments, unjudgeable: "command substitution" };
+    if (
+      char === "`" ||
+      (char === "$" && next === "(") ||
+      (char === "<" && next === "(")
+    )
+      return { segments, unjudgeable: "command substitution" };
     if (char === "(" || char === ")") {
       // A subshell runs what is inside it; judge that as its own segment.
       push();
       continue;
     }
-    if (char === "$" && expands(next, "")) return { segments, unjudgeable: "variable expansion" };
-    if (char === "~" && wordStart && next !== "" && next !== "/" && !/\s/.test(next)) return { segments, unjudgeable: "tilde expansion" };
+    if (char === "$" && expands(next, ""))
+      return { segments, unjudgeable: "variable expansion" };
+    if (char === "~" && wordStart && next !== "" && next !== "/" && !/\s/.test(next))
+      return { segments, unjudgeable: "tilde expansion" };
     if (char === "{") {
       // `{a,b}` and `{1..3}` expand to several words; a bare `{}` (find -exec) does not.
       const close = line.indexOf("}", index);
       const inside = close === -1 ? "" : line.slice(index + 1, close);
-      if (inside.includes(",") || inside.includes("..")) return { segments, unjudgeable: "brace expansion" };
+      if (inside.includes(",") || inside.includes(".."))
+        return { segments, unjudgeable: "brace expansion" };
     }
     if (char === ">") {
       // `2>/dev/null` and `2>&1` discard or merge output; they cannot write a file.
-      const harmless = /^(?:>\s*\/dev\/null|>&[0-9])(?=$|[\s;&|])/.exec(line.slice(index));
+      const harmless = /^(?:>\s*\/dev\/null|>&[0-9])(?=$|[\s;&|])/.exec(
+        line.slice(index),
+      );
       if (!harmless) return { segments, unjudgeable: "output redirect" };
       current = current.replace(/(^|\s)[0-9]$/, "$1"); // the fd number belongs to the redirect
       index += harmless[0].length - 1;
       continue;
     }
-    if (char === "*" || char === "?" || char === "[") return { segments, unjudgeable: `a shell glob (${char})` };
+    if (char === "*" || char === "?" || char === "[")
+      return { segments, unjudgeable: `a shell glob (${char})` };
     if (char === "\n" || char === "\r" || char === ";") {
       push();
       if (char === ";" && next === ";") index++;
@@ -238,7 +310,8 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
     }
     if (char === "&") {
       if (next === ">") return { segments, unjudgeable: "output redirect" };
-      if (/^&[0-9]/.test(line.slice(index))) return { segments, unjudgeable: "output redirect" }; // a stray >&2 form
+      if (/^&[0-9]/.test(line.slice(index)))
+        return { segments, unjudgeable: "output redirect" }; // a stray >&2 form
       push();
       if (next === "&") index++;
       continue;
@@ -255,7 +328,8 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
  * Only assignments that cannot change what a command does are stripped; any other
  * leading assignment refuses the segment.
  */
-const HARMLESS_ASSIGNMENT = /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|LANG|LC_ALL|DEBUG|TERM|COLUMNS)$/;
+const HARMLESS_ASSIGNMENT =
+  /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|LANG|LC_ALL|DEBUG|TERM|COLUMNS)$/;
 function leadingAssignment(segment: string): { rest: string; refused: string | null } {
   let rest = segment;
   for (;;) {
@@ -301,11 +375,22 @@ function subjects(operation: Operation, workspaceRoot: string): Subject[] {
     case "read":
       return operation.paths.map((path) => plain(relativise(workspaceRoot, path)));
     case "write":
-      return operation.changes.map((change) => plain(relativise(workspaceRoot, change.path)));
+      return operation.changes.map((change) =>
+        plain(relativise(workspaceRoot, change.path)),
+      );
     case "exec":
       return parseCommand(operation.command).segments.map((segment) => ({
         // A program fed by xargs runs with words we cannot see; `curl *` must still see it.
-        deny: [...new Set([segment.text, segment.unwrapped, segment.named, ...(segment.fed ? [`${segment.unwrapped} <stdin>`, `${segment.named} <stdin>`] : [])])],
+        deny: [
+          ...new Set([
+            segment.text,
+            segment.unwrapped,
+            segment.named,
+            ...(segment.fed
+              ? [`${segment.unwrapped} <stdin>`, `${segment.named} <stdin>`]
+              : []),
+          ]),
+        ],
         allow: [...new Set([segment.text, segment.unwrapped])],
       }));
     case "net":
@@ -325,12 +410,28 @@ function firstMatch(
   );
 }
 
-function firstDenied(patterns: readonly Pattern[], kind: string, subjects: readonly Subject[]): Pattern | undefined {
-  return firstMatch(patterns, kind, subjects.flatMap((subject) => subject.deny));
+function firstDenied(
+  patterns: readonly Pattern[],
+  kind: string,
+  subjects: readonly Subject[],
+): Pattern | undefined {
+  return firstMatch(
+    patterns,
+    kind,
+    subjects.flatMap((subject) => subject.deny),
+  );
 }
 
-function firstAllowed(patterns: readonly Pattern[], kind: string, subjects: readonly Subject[]): Pattern | undefined {
-  return firstMatch(patterns, kind, subjects.flatMap((subject) => subject.allow));
+function firstAllowed(
+  patterns: readonly Pattern[],
+  kind: string,
+  subjects: readonly Subject[],
+): Pattern | undefined {
+  return firstMatch(
+    patterns,
+    kind,
+    subjects.flatMap((subject) => subject.allow),
+  );
 }
 
 function everySubjectMatches(
@@ -339,7 +440,9 @@ function everySubjectMatches(
   subjects: readonly Subject[],
 ): boolean {
   return subjects.every((subject) =>
-    subject.allow.some((value) => patterns.some((pattern) => pattern.kind === kind && pattern.test(value))),
+    subject.allow.some((value) =>
+      patterns.some((pattern) => pattern.kind === kind && pattern.test(value)),
+    ),
   );
 }
 
@@ -360,7 +463,11 @@ export class BuiltinDecider implements Decider {
   private readonly reachLimit: number;
 
   constructor(
-    lists: { allow: readonly string[]; deny: readonly string[]; ask?: readonly string[] },
+    lists: {
+      allow: readonly string[];
+      deny: readonly string[];
+      ask?: readonly string[];
+    },
     options: { reachLimit?: number } = {},
   ) {
     this.allow = parsePatterns(lists.allow);
@@ -379,34 +486,64 @@ export class BuiltinDecider implements Decider {
     dirs: readonly string[],
     search: { hidden: boolean; follow: boolean; respectsIgnore: boolean },
     root: string,
-  ): Promise<{ refused: Decision | null; reached: Array<{ where: string; subjects: Subject[] }> }> {
+  ): Promise<{
+    refused: Decision | null;
+    reached: Array<{ where: string; subjects: Subject[] }>;
+  }> {
     const reached: Array<{ where: string; subjects: Subject[] }> = [];
     for (const dir of dirs) {
       if (!isDirectory(dir)) continue;
-      const reach = reachableFiles(dir, root, { hidden: search.hidden, follow: search.follow, limit: this.reachLimit });
+      const reach = reachableFiles(dir, root, {
+        hidden: search.hidden,
+        follow: search.follow,
+        limit: this.reachLimit,
+      });
       const where = relativise(root, dir);
-      const refuse = (reason: string, rule?: string): { refused: Decision; reached: [] } => ({ refused: { verdict: "deny", reason, ...(rule ? { rule } : {}) }, reached: [] });
+      const refuse = (
+        reason: string,
+        rule?: string,
+      ): { refused: Decision; reached: [] } => ({
+        refused: { verdict: "deny", reason, ...(rule ? { rule } : {}) },
+        reached: [],
+      });
       if (reach.truncated)
-        return refuse(`Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.`);
+        return refuse(
+          `Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.`,
+        );
       if (reach.outside)
-        return refuse(`Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`);
+        return refuse(
+          `Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`,
+        );
       const named = reach.files.map((file) => [file, relativise(root, file)] as const);
-      const denied = named.filter(([, relativePath]) => firstMatch(this.deny, "read", [relativePath]));
-      const ignored = denied.length && search.respectsIgnore ? await gitIgnored(root, denied.map(([file]) => file)) : new Set<string>();
+      const denied = named.filter(([, relativePath]) =>
+        firstMatch(this.deny, "read", [relativePath]),
+      );
+      const ignored =
+        denied.length && search.respectsIgnore
+          ? await gitIgnored(
+              root,
+              denied.map(([file]) => file),
+            )
+          : new Set<string>();
       const first = denied.find(([file]) => !ignored.has(file));
       if (first) {
         const rule = firstMatch(this.deny, "read", [first[1]])!;
-        return refuse(`Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`, rule.source);
+        return refuse(
+          `Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`,
+          rule.source,
+        );
       }
-      reached.push({ where, subjects: named.filter(([file]) => !ignored.has(file)).map(([, relativePath]) => plain(relativePath)) });
+      reached.push({
+        where,
+        subjects: named
+          .filter(([file]) => !ignored.has(file))
+          .map(([, relativePath]) => plain(relativePath)),
+      });
     }
     return { refused: null, reached };
   }
 
-  async decide(
-    operation: Operation,
-    context: DecisionContext,
-  ): Promise<Decision> {
+  async decide(operation: Operation, context: DecisionContext): Promise<Decision> {
     if (operation.kind === "exec") {
       const { unjudgeable } = parseCommand(operation.command);
       if (unjudgeable)
@@ -420,15 +557,21 @@ export class BuiltinDecider implements Decider {
 
     // An operation that declares nothing cannot be judged, and [].every() is true.
     if (values.length === 0) {
-      if (operation.kind === "read")
-        values.push(plain("."));
+      if (operation.kind === "read") values.push(plain("."));
       else
-        return { verdict: "deny", reason: `Refused: a ${operation.kind} operation with nothing declared.` };
+        return {
+          verdict: "deny",
+          reason: `Refused: a ${operation.kind} operation with nothing declared.`,
+        };
     }
 
     // Claude's Grep runs `rg --hidden`: dotfiles too, symlinks not followed, .gitignore honoured.
     if (operation.kind === "read" && operation.recursive) {
-      const { refused, reached } = await this.reach(operation.paths, { hidden: true, follow: false, respectsIgnore: true }, context.workspaceRoot);
+      const { refused, reached } = await this.reach(
+        operation.paths,
+        { hidden: true, follow: false, respectsIgnore: true },
+        context.workspaceRoot,
+      );
       if (refused) return refused;
       // The search reads the files, not the directory entry: the allow list must cover those.
       for (const { where, subjects: files } of reached) {
@@ -442,9 +585,16 @@ export class BuiltinDecider implements Decider {
     // `grep -r`, `rg`, `diff -r`: a command that searches a directory reaches what is in it.
     if (operation.kind === "exec")
       for (const segment of parseCommand(operation.command).segments) {
-        const search = recursiveReadOf(segment.words.slice(segment.programIndex), operation.cwd);
+        const search = recursiveReadOf(
+          segment.words.slice(segment.programIndex),
+          operation.cwd,
+        );
         if (!search) continue;
-        const { refused } = await this.reach(search.dirs, search, context.workspaceRoot);
+        const { refused } = await this.reach(
+          search.dirs,
+          search,
+          context.workspaceRoot,
+        );
         if (refused) return refused;
       }
 
@@ -452,7 +602,9 @@ export class BuiltinDecider implements Decider {
       // A command that names a file is a read of that file, whatever the file is called
       // on the command line: containment resolved the names to what is on disk.
       if (operation.paths?.length) {
-        const named = operation.paths.map((path) => relativise(context.workspaceRoot, path));
+        const named = operation.paths.map((path) =>
+          relativise(context.workspaceRoot, path),
+        );
         const denied = firstMatch(this.deny, "read", named);
         if (denied)
           return {
@@ -498,7 +650,10 @@ export class BuiltinDecider implements Decider {
 
     // Every segment must be covered by allow or ask for the question to be worth asking:
     // a segment nobody would allow makes the whole command a refusal, not a question.
-    if (this.ask.length && everySubjectMatches([...this.allow, ...this.ask], operation.kind, values)) {
+    if (
+      this.ask.length &&
+      everySubjectMatches([...this.allow, ...this.ask], operation.kind, values)
+    ) {
       const matched = firstAllowed(this.ask, operation.kind, values);
       return {
         verdict: "ask",

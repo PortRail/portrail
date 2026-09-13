@@ -13,11 +13,20 @@ const RANGE = String.raw`(?:${ADDRESS}(?:,${ADDRESS})?)?`;
 /** Print, delete, hold-space shuffles, `=`, `l`, `q`, and `s`/`y` with `/` delimiters and safe flags. */
 const COMMAND = String.raw`(?:[pPdDnNhHgGx=]|[qQ]\d*|l\d*|s/${PART}/${PART}/[gpI0-9]*|y/${PART}/${PART}/)`;
 const STATEMENT = String.raw`\s*${RANGE}\s*!?\s*${COMMAND}\s*`;
-export const SED_PRINT_FILTER = new RegExp(String.raw`^${STATEMENT}(?:;${STATEMENT})*;?$`);
+export const SED_PRINT_FILTER = new RegExp(
+  String.raw`^${STATEMENT}(?:;${STATEMENT})*;?$`,
+);
 
 /** Options that change how sed reads, not what it may do. */
 const FLAGS = /^-[nErsuz]+$/;
-const LONG_FLAGS = new Set(["--quiet", "--silent", "--regexp-extended", "--separate", "--unbuffered", "--null-data"]);
+const LONG_FLAGS = new Set([
+  "--quiet",
+  "--silent",
+  "--regexp-extended",
+  "--separate",
+  "--unbuffered",
+  "--null-data",
+]);
 
 /**
  * Why a sed invocation does more than print or filter, or null when it is fine.

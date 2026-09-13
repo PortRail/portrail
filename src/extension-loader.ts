@@ -19,7 +19,9 @@ export interface LoadResult {
  */
 export async function loadExtension(): Promise<LoadResult> {
   const configured = process.env.PORTRAIL_EXTENSION;
-  const specifier: string = configured ? pathToFileURL(resolve(configured)).href : EXTENSION_MODULE;
+  const specifier: string = configured
+    ? pathToFileURL(resolve(configured)).href
+    : EXTENSION_MODULE;
   let module: unknown;
   try {
     module = await import(specifier);
@@ -40,8 +42,14 @@ export async function loadExtension(): Promise<LoadResult> {
     (module as { extension?: unknown }).extension ??
     module;
 
-  if (!candidate || typeof candidate !== "object" || typeof (candidate as Extension).name !== "string")
-    throw new Error(`${configured ?? EXTENSION_MODULE} did not export a Portrail extension.`);
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    typeof (candidate as Extension).name !== "string"
+  )
+    throw new Error(
+      `${configured ?? EXTENSION_MODULE} did not export a Portrail extension.`,
+    );
 
   const extension = candidate as Extension;
   return { extension, detail: `${extension.name} ${extension.version}` };

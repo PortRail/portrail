@@ -33,7 +33,10 @@ async function portFree(host: string, port: number): Promise<boolean> {
  * "will a run work, and if not, what do I type next?" `--live` makes the agent
  * checks talk to the agents for real (Claude's costs one tiny call).
  */
-export async function collectChecks(home: string | undefined, live = false): Promise<Check[]> {
+export async function collectChecks(
+  home: string | undefined,
+  live = false,
+): Promise<Check[]> {
   const checks: Check[] = [];
   const nodeMajor = Number(process.versions.node.split(".")[0]);
 
@@ -41,7 +44,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
     name: "Node.js",
     ok: nodeMajor >= 24,
     detail: `v${process.versions.node} on ${process.platform}/${process.arch}`,
-    ...(nodeMajor >= 24 ? {} : { fix: "Portrail needs Node 24 or newer: nvm install 24" }),
+    ...(nodeMajor >= 24
+      ? {}
+      : { fix: "Portrail needs Node 24 or newer: nvm install 24" }),
   });
 
   const dir = dataDirectory(home);
@@ -50,7 +55,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
   checks.push({
     name: "Data directory",
     ok: !exists || mode === 0o700,
-    detail: exists ? `${dir} (mode ${mode?.toString(8)})` : `${dir} (not created yet — run portrail init)`,
+    detail: exists
+      ? `${dir} (mode ${mode?.toString(8)})`
+      : `${dir} (not created yet — run portrail init)`,
     ...(exists && mode !== 0o700 ? { fix: `chmod 700 ${dir}` } : {}),
   });
 
@@ -60,15 +67,25 @@ export async function collectChecks(home: string | undefined, live = false): Pro
     checks.push({
       name: "Config",
       ok: true,
-      detail: existsSync(configPath(dir)) ? `${configPath(dir)} is valid` : "built-in defaults (portrail init writes a file)",
+      detail: existsSync(configPath(dir))
+        ? `${configPath(dir)} is valid`
+        : "built-in defaults (portrail init writes a file)",
     });
   } catch (error) {
-    checks.push({ name: "Config", ok: false, detail: (error as Error).message, fix: `Fix or delete ${configPath(dir)}` });
+    checks.push({
+      name: "Config",
+      ok: false,
+      detail: (error as Error).message,
+      fix: `Fix or delete ${configPath(dir)}`,
+    });
   }
 
   // ---- agents: the same probes the daemon uses, so doctor and reality agree
   const codexBinary = await probeCodex(config?.agents.codex.path);
-  const codex = await new CodexProvider({ executablePath: config?.agents.codex.path ?? null, dataDir: dir }).probe({ deep: live });
+  const codex = await new CodexProvider({
+    executablePath: config?.agents.codex.path ?? null,
+    dataDir: dir,
+  }).probe({ deep: live });
   checks.push({
     name: "Codex",
     ok: codex.ready,
@@ -77,7 +94,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
       : "not installed",
     ...(codex.ready
       ? codexBinary.offPath
-        ? { fix: `Pin it: set agents.codex.path to "${codexBinary.path}" in ${configPath(dir)}` }
+        ? {
+            fix: `Pin it: set agents.codex.path to "${codexBinary.path}" in ${configPath(dir)}`,
+          }
         : {}
       : codex.installed
         ? { fix: "Sign in: codex login" }
@@ -85,7 +104,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
   });
 
   const claudeCli = await probeClaudeCli(config?.agents.claude.path);
-  const claude = await new ClaudeProvider({ executablePath: config?.agents.claude.path ?? null }).probe({ deep: live });
+  const claude = await new ClaudeProvider({
+    executablePath: config?.agents.claude.path ?? null,
+  }).probe({ deep: live });
   checks.push({
     name: "Claude Code",
     ok: claude.ready,
@@ -96,7 +117,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
       ? {}
       : claude.installed
         ? { fix: "Sign in once: run `claude` and log in. Or set ANTHROPIC_API_KEY." }
-        : { fix: "npm install -g @anthropic-ai/claude-agent-sdk (or reinstall Portrail without --omit=optional)" }),
+        : {
+            fix: "npm install -g @anthropic-ai/claude-agent-sdk (or reinstall Portrail without --omit=optional)",
+          }),
   });
 
   if (!codex.ready && !claude.ready)
@@ -115,10 +138,20 @@ export async function collectChecks(home: string | undefined, live = false): Pro
       checks.push({
         name: "Workspaces",
         ok: workspaces.length > 0,
-        detail: workspaces.length ? workspaces.map((w) => w.name).join(", ") : "none enrolled",
-        ...(workspaces.length ? {} : { fix: "portrail workspace add /path/to/project --name project" }),
+        detail: workspaces.length
+          ? workspaces.map((w) => w.name).join(", ")
+          : "none enrolled",
+        ...(workspaces.length
+          ? {}
+          : { fix: "portrail workspace add /path/to/project --name project" }),
       });
-      const keys = new Keys(store).list().filter((key) => !key.revokedAt && (!key.expiresAt || Date.parse(key.expiresAt) > Date.now()));
+      const keys = new Keys(store)
+        .list()
+        .filter(
+          (key) =>
+            !key.revokedAt &&
+            (!key.expiresAt || Date.parse(key.expiresAt) > Date.now()),
+        );
       checks.push({
         name: "API keys",
         ok: keys.length > 0,
@@ -129,7 +162,12 @@ export async function collectChecks(home: string | undefined, live = false): Pro
       store.close();
     }
   } else {
-    checks.push({ name: "Workspaces", ok: false, detail: "not set up yet", fix: "portrail init --workspace /path/to/project" });
+    checks.push({
+      name: "Workspaces",
+      ok: false,
+      detail: "not set up yet",
+      fix: "portrail init --workspace /path/to/project",
+    });
   }
 
   // ---- listener: "in use" is fine if it is us
@@ -144,7 +182,9 @@ export async function collectChecks(home: string | undefined, live = false): Pro
         : free
           ? `not running; ${config.listen.host}:${config.listen.port} is free`
           : `${config.listen.host}:${config.listen.port} is in use by something else`,
-      ...(free || running ? {} : { fix: "Stop whatever holds the port, or set listen.port in config.json." }),
+      ...(free || running
+        ? {}
+        : { fix: "Stop whatever holds the port, or set listen.port in config.json." }),
     });
   }
 
@@ -159,7 +199,10 @@ export async function collectChecks(home: string | undefined, live = false): Pro
 
   try {
     const pro = await loadExtension();
-    const status = pro.extension?.status?.(dir) ?? { active: !!pro.extension, detail: "" };
+    const status = pro.extension?.status?.(dir) ?? {
+      active: !!pro.extension,
+      detail: "",
+    };
     checks.push({
       name: "Portrail Pro",
       ok: true,
@@ -179,12 +222,16 @@ export async function doctor(home: string | undefined, json: boolean, live = fal
   const checks = await collectChecks(home, live);
   const failed = checks.filter((check) => !check.ok);
   if (json) {
-    console.log(JSON.stringify({ version, live, ok: failed.length === 0, checks }, null, 2));
+    console.log(
+      JSON.stringify({ version, live, ok: failed.length === 0, checks }, null, 2),
+    );
     return failed.length ? 1 : 0;
   }
   console.log(`Portrail ${version}${live ? " (live checks)" : ""}\n`);
   for (const check of checks) {
-    console.log(`${check.ok ? "  ok " : "  ✗  "} ${check.name.padEnd(15)} ${check.detail}`);
+    console.log(
+      `${check.ok ? "  ok " : "  ✗  "} ${check.name.padEnd(15)} ${check.detail}`,
+    );
     if (check.fix) console.log(`      ${" ".repeat(15)} → ${check.fix}`);
   }
   console.log(
@@ -192,6 +239,9 @@ export async function doctor(home: string | undefined, json: boolean, live = fal
       ? `\n${failed.length} thing${failed.length === 1 ? "" : "s"} to fix before a run will work.`
       : "\nReady. A run will work.",
   );
-  if (!live) console.log("Agent sign-in was checked from credentials on disk; add --live to verify with the agents.");
+  if (!live)
+    console.log(
+      "Agent sign-in was checked from credentials on disk; add --live to verify with the agents.",
+    );
   return failed.length ? 1 : 0;
 }

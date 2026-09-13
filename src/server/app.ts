@@ -6,7 +6,14 @@ import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
 import { obj, optNum, optStr, str } from "./body.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
-import { digest, equal, id as newId, now, type Store, type PortrailEvent } from "../store/index.ts";
+import {
+  digest,
+  equal,
+  id as newId,
+  now,
+  type Store,
+  type PortrailEvent,
+} from "../store/index.ts";
 import { TERMINAL_STATES, type AgentId } from "../types.ts";
 import { API_PREFIX, version } from "../runtime.ts";
 import { SessionEventPacer } from "./event-pacer.ts";
@@ -69,7 +76,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     connectionTimeout: 0,
     keepAliveTimeout: 65_000,
     ...(options.tls
-      ? { https: { cert: readFileSync(options.tls.cert), key: readFileSync(options.tls.key) } }
+      ? {
+          https: {
+            cert: readFileSync(options.tls.cert),
+            key: readFileSync(options.tls.key),
+          },
+        }
       : {}),
   });
   const pacer = new SessionEventPacer();
@@ -78,14 +90,19 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   // Clients routinely send Content-Type: application/json on a bodiless DELETE or
   // POST. Treat an empty body as an empty object instead of a 400.
   app.removeContentTypeParser("application/json");
-  app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, payload, done) => {
-    if (!payload || (typeof payload === "string" && payload.trim() === "")) return done(null, {});
-    try {
-      done(null, JSON.parse(payload as string));
-    } catch (error) {
-      done(Object.assign(error as Error, { statusCode: 400 }), undefined);
-    }
-  });
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (_request, payload, done) => {
+      if (!payload || (typeof payload === "string" && payload.trim() === ""))
+        return done(null, {});
+      try {
+        done(null, JSON.parse(payload as string));
+      } catch (error) {
+        done(Object.assign(error as Error, { statusCode: 400 }), undefined);
+      }
+    },
+  );
 
   // ------------------------------------------------------------ plumbing
 
@@ -99,14 +116,32 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   });
 
   app.setErrorHandler((error: any, request, reply) => {
-    if (error instanceof PortrailError) return reply.code(error.status).send(error.toJSON());
-    const status = error.statusCode === 413 ? 413 : error.statusCode === 400 ? 400 : error.statusCode === 415 ? 415 : 500;
+    if (error instanceof PortrailError)
+      return reply.code(error.status).send(error.toJSON());
+    const status =
+      error.statusCode === 413
+        ? 413
+        : error.statusCode === 400
+          ? 400
+          : error.statusCode === 415
+            ? 415
+            : 500;
     const requestId = newId("req");
     // The client gets an id and a bland message; the operator gets the id and the cause.
-    if (status === 500) console.error(`${requestId} ${request.method} ${request.url} ${error?.stack ?? error}`);
+    if (status === 500)
+      console.error(
+        `${requestId} ${request.method} ${request.url} ${error?.stack ?? error}`,
+      );
     return reply.code(status).send({
       error: {
-        code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_REQUEST" : status === 415 ? "UNSUPPORTED_MEDIA_TYPE" : "INTERNAL_ERROR",
+        code:
+          status === 413
+            ? "PAYLOAD_TOO_LARGE"
+            : status === 400
+              ? "INVALID_REQUEST"
+              : status === 415
+                ? "UNSUPPORTED_MEDIA_TYPE"
+                : "INTERNAL_ERROR",
         message:
           status === 500
             ? "Portrail could not complete the request."
@@ -118,11 +153,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   });
 
   app.setNotFoundHandler((_request, reply) =>
-    reply.code(404).send({ error: { code: "NOT_FOUND", message: "No such route.", retryable: false } }),
+    reply.code(404).send({
+      error: { code: "NOT_FOUND", message: "No such route.", retryable: false },
+    }),
   );
 
   // The scheme is case-insensitive (RFC 7235); proxies and clients spell it as they like.
-  const bearer = (request: FastifyRequest) => /^bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
+  const bearer = (request: FastifyRequest) =>
+    /^bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
 
   /** Authenticate and check one scope. Attaches the principal to the request. */
   const auth = (request: FastifyRequest, scope: Scope): Principal => {
@@ -139,7 +177,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   const body = (request: FastifyRequest): Record<string, unknown> => {
     const value = request.body ?? {};
-    ensure(typeof value === "object" && !Array.isArray(value), 400, "INVALID_REQUEST", "The request body must be a JSON object.");
+    ensure(
+      typeof value === "object" && !Array.isArray(value),
+      400,
+      "INVALID_REQUEST",
+      "The request body must be a JSON object.",
+    );
     return value as Record<string, unknown>;
   };
   const params = (request: FastifyRequest) => request.params as Record<string, string>;
@@ -149,7 +192,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
    * stored response; the same key with a different body is a conflict. Automations
    * retry, and a retried "start a run" must never start two.
    */
-  function idempotent<T extends { id: string }>(request: FastifyRequest, principal: string, execute: () => T, recall: (stored: { id: string }) => T): T {
+  function idempotent<T extends { id: string }>(
+    request: FastifyRequest,
+    principal: string,
+    execute: () => T,
+    recall: (stored: { id: string }) => T,
+  ): T {
     const key = request.headers["idempotency-key"];
     if (key === undefined) return execute();
     ensure(
@@ -162,7 +210,9 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     const hash = digest(request.body ?? {});
     return store.tx(() => {
       const previous = store.db
-        .prepare("SELECT digest, response FROM commands WHERE principal=? AND route=? AND key=?")
+        .prepare(
+          "SELECT digest, response FROM commands WHERE principal=? AND route=? AND key=?",
+        )
         .get(principal, route, key) as { digest: string; response: string } | undefined;
       if (previous) {
         ensure(
@@ -199,9 +249,21 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     status: "ok",
     version,
     agents: await options.agentStatus().then((agents) =>
-      (agents as Array<{ id: string; ready: boolean }>).map((agent) => ({ id: agent.id, ready: agent.ready })),
+      (agents as Array<{ id: string; ready: boolean }>).map((agent) => ({
+        id: agent.id,
+        ready: agent.ready,
+      })),
     ),
-    pro: options.extension ? { name: options.extension.name, version: options.extension.version, ...(options.extension.status?.(options.dataDir) ?? { active: true, detail: "" }) } : null,
+    pro: options.extension
+      ? {
+          name: options.extension.name,
+          version: options.extension.version,
+          ...(options.extension.status?.(options.dataDir) ?? {
+            active: true,
+            detail: "",
+          }),
+        }
+      : null,
   }));
 
   // ---------------------------------------------------------------- runs
@@ -233,7 +295,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
         ...(callback !== undefined ? { callback } : {}),
       },
     };
-    const run = idempotent(request, principal.keyId, () => gateway.createRun(create), ({ id }) => gateway.run(id));
+    const run = idempotent(
+      request,
+      principal.keyId,
+      () => gateway.createRun(create),
+      ({ id }) => gateway.run(id),
+    );
 
     if (!wait) return reply.code(202).send(runView(run));
 
@@ -244,7 +311,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     // the body: a client cannot learn the outcome from a status code that had to
     // be chosen before the run ended.
     reply.hijack();
-    reply.raw.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Portrail-Wait": "1" });
+    reply.raw.writeHead(200, {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Portrail-Wait": "1",
+    });
     const keepalive = setInterval(() => {
       if (!reply.raw.writableEnded) reply.raw.write("\n");
     }, 15_000);
@@ -254,7 +325,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     } finally {
       clearInterval(keepalive);
     }
-    if (!reply.raw.writableEnded) reply.raw.end(JSON.stringify(runView(gateway.run(run.id))));
+    if (!reply.raw.writableEnded)
+      reply.raw.end(JSON.stringify(runView(gateway.run(run.id))));
     return;
   });
 
@@ -300,11 +372,26 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   const localOnly = (request: FastifyRequest) => {
     const given = request.headers["x-portrail-local"];
     const expected = options.localToken;
-    ensure(typeof expected === "string" && expected.length > 0, 404, "NOT_FOUND", "No such route.");
-    ensure(equal(typeof given === "string" ? given : "", expected), 403, "FORBIDDEN", "Answers are accepted only from this machine (X-Portrail-Local from daemon.json).");
+    ensure(
+      typeof expected === "string" && expected.length > 0,
+      404,
+      "NOT_FOUND",
+      "No such route.",
+    );
+    ensure(
+      equal(typeof given === "string" ? given : "", expected),
+      403,
+      "FORBIDDEN",
+      "Answers are accepted only from this machine (X-Portrail-Local from daemon.json).",
+    );
     // Belt and braces: even with the token, the connection itself must be local.
     const from = request.socket?.remoteAddress ?? "";
-    ensure(from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1", 403, "FORBIDDEN", "Answers are accepted only over the loopback interface.");
+    ensure(
+      from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1",
+      403,
+      "FORBIDDEN",
+      "Answers are accepted only over the loopback interface.",
+    );
   };
 
   app.get(`${API_PREFIX}/operations/pending`, async (request) => {
@@ -315,15 +402,31 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   app.post(`${API_PREFIX}/operations/:operationId/answer`, async (request) => {
     localOnly(request);
     const input = body(request);
-    ensure(input.verdict === "allow" || input.verdict === "deny", 400, "INVALID_REQUEST", 'verdict must be "allow" or "deny".');
-    const who = typeof input.by === "string" && input.by.trim() ? input.by.trim().slice(0, 64) : "terminal";
+    ensure(
+      input.verdict === "allow" || input.verdict === "deny",
+      400,
+      "INVALID_REQUEST",
+      'verdict must be "allow" or "deny".',
+    );
+    const who =
+      typeof input.by === "string" && input.by.trim()
+        ? input.by.trim().slice(0, 64)
+        : "terminal";
     const verdict = input.verdict as "allow" | "deny";
     gateway.resolve(
       params(request).operationId!,
-      { verdict, reason: `${verdict === "allow" ? "Allowed" : "Refused"} once at this machine by ${who}.`, rule: "ask", scope: "once" },
+      {
+        verdict,
+        reason: `${verdict === "allow" ? "Allowed" : "Refused"} once at this machine by ${who}.`,
+        rule: "ask",
+        scope: "once",
+      },
       `local:${who}`,
     );
-    return gateway.listOperations().find((op) => op.id === params(request).operationId) ?? fail(404, "NOT_FOUND", "Operation not found.");
+    return (
+      gateway.listOperations().find((op) => op.id === params(request).operationId) ??
+      fail(404, "NOT_FOUND", "Operation not found.")
+    );
   });
 
   // -------------------------------------------------------------- events
@@ -335,7 +438,10 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     const query = request.query as Record<string, string | undefined>;
     const lastEventId = request.headers["last-event-id"];
 
-    for (const [label, value] of [["Last-Event-ID", lastEventId], ["after", query.after]] as const)
+    for (const [label, value] of [
+      ["Last-Event-ID", lastEventId],
+      ["after", query.after],
+    ] as const)
       ensure(
         value === undefined || (typeof value === "string" && /^\d+$/.test(value)),
         400,
@@ -343,7 +449,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
         `${label} must be a whole number.`,
       );
     let seq = Number(lastEventId ?? query.after ?? 0);
-    ensure(seq <= session.lastEventSeq, 400, "INVALID_CURSOR", "Cursor is ahead of the stream.");
+    ensure(
+      seq <= session.lastEventSeq,
+      400,
+      "INVALID_CURSOR",
+      "Cursor is ahead of the stream.",
+    );
     const earliest = store.earliestEvent(session.id);
     ensure(
       earliest === null || seq >= earliest - 1,
@@ -374,7 +485,10 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       if (!buffered.length) buffered = store.events(session.id, seq, 100);
       return buffered.shift();
     };
-    const finished = () => TERMINAL_STATES.has(store.get<RunRecord>("run", run.id)?.state ?? "outcome_unknown");
+    const finished = () =>
+      TERMINAL_STATES.has(
+        store.get<RunRecord>("run", run.id)?.state ?? "outcome_unknown",
+      );
     // Writes at most one event per call and says so. Events that are not this run's
     // are consumed silently and never count against the session's allowance, so a
     // long earlier run cannot starve a later one. The stream ends itself once this
@@ -391,8 +505,14 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
         }
         seq = next.seq;
         if (onlyThisRun && next.runId !== run.id) continue;
-        reply.raw.write(`id: ${next.seq}\nevent: ${next.type}\ndata: ${JSON.stringify(next)}\n\n`);
-        if ((onlyThisRun && next.type === "run.completed") || reply.raw.writableLength > 1024 * 1024) reply.raw.end();
+        reply.raw.write(
+          `id: ${next.seq}\nevent: ${next.type}\ndata: ${JSON.stringify(next)}\n\n`,
+        );
+        if (
+          (onlyThisRun && next.type === "run.completed") ||
+          reply.raw.writableLength > 1024 * 1024
+        )
+          reply.raw.end();
         return true;
       }
     });
@@ -417,7 +537,10 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       clearInterval(heartbeat);
       delivery.close();
       gateway.off("event", onEvent);
-      streams.set(principal.keyId, Math.max(0, (streams.get(principal.keyId) ?? 1) - 1));
+      streams.set(
+        principal.keyId,
+        Math.max(0, (streams.get(principal.keyId) ?? 1) - 1),
+      );
     });
   });
 
@@ -446,7 +569,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   app.post(`${API_PREFIX}/workspaces`, async (request, reply) => {
     auth(request, "workspaces:admin");
     const input = body(request);
-    return reply.code(201).send(gateway.addWorkspace({ name: str(input, "name"), root: str(input, "root") }));
+    return reply
+      .code(201)
+      .send(
+        gateway.addWorkspace({ name: str(input, "name"), root: str(input, "root") }),
+      );
   });
   app.delete(`${API_PREFIX}/workspaces/:ref`, async (request, reply) => {
     auth(request, "workspaces:admin");
@@ -482,7 +609,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   });
   app.delete(`${API_PREFIX}/keys/:keyId`, async (request) => {
     const principal = auth(request, "keys:admin");
-    ensure(params(request).keyId !== principal.keyId, 409, "SELF_REVOKE", "A key cannot revoke itself.");
+    ensure(
+      params(request).keyId !== principal.keyId,
+      409,
+      "SELF_REVOKE",
+      "A key cannot revoke itself.",
+    );
     return publicKey(keys.revoke(params(request).keyId!));
   });
 
@@ -495,7 +627,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       store,
       gateway,
       options: {},
-      resolve: (operationId, decision, actor) => gateway.resolve(operationId, decision, actor),
+      resolve: (operationId, decision, actor) =>
+        gateway.resolve(operationId, decision, actor),
     };
     await options.extension.routes(app, host);
   }
@@ -504,7 +637,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   return app;
 }
 
-function waitForRun(gateway: Gateway, runId: string, timeoutMs: number): Promise<boolean> {
+function waitForRun(
+  gateway: Gateway,
+  runId: string,
+  timeoutMs: number,
+): Promise<boolean> {
   if (TERMINAL_STATES.has(gateway.run(runId).state)) return Promise.resolve(true);
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -522,4 +659,3 @@ function waitForRun(gateway: Gateway, runId: string, timeoutMs: number): Promise
     gateway.on("event", onEvent);
   });
 }
-

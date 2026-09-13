@@ -30,7 +30,10 @@ test("TLS needs both halves or neither", () => {
 });
 
 test("the run time limit has the same bounds in the config as on the API", () => {
-  assert.throws(() => validateConfig({ run: { maxSeconds: 20_000 } }), /run\.maxSeconds/);
+  assert.throws(
+    () => validateConfig({ run: { maxSeconds: 20_000 } }),
+    /run\.maxSeconds/,
+  );
   assert.throws(() => validateConfig({ run: { maxSeconds: 29 } }), /run\.maxSeconds/);
   assert.equal(validateConfig({ run: { maxSeconds: 14_400 } }).run.maxSeconds, 14_400);
   assert.deepEqual(RUN_MAX_SECONDS, { min: 30, max: 14_400 });

@@ -48,7 +48,10 @@ export interface CreateRunInput {
 }
 
 /** The answer to any question asked on behalf of a run that is over. */
-const NOT_ACTIVE: Decision = { verdict: "deny", reason: "The run is no longer active." };
+const NOT_ACTIVE: Decision = {
+  verdict: "deny",
+  reason: "The run is no longer active.",
+};
 
 interface Worker {
   epoch: string;
@@ -145,7 +148,12 @@ export class Gateway extends EventEmitter {
     let canonical: string;
     try {
       canonical = realpathSync.native(input.root);
-      ensure(statSync(canonical).isDirectory(), 400, "INVALID_REQUEST", "Choose a directory.");
+      ensure(
+        statSync(canonical).isDirectory(),
+        400,
+        "INVALID_REQUEST",
+        "Choose a directory.",
+      );
     } catch (error) {
       if (error instanceof PortrailError) throw error;
       fail(400, "INVALID_REQUEST", `Workspace directory does not exist: ${input.root}`);
@@ -155,7 +163,9 @@ export class Gateway extends EventEmitter {
     return this.store.tx(() => {
       const existing = this.store
         .list<Workspace>("workspace")
-        .find((workspace) => workspace.name === input.name || workspace.root === canonical);
+        .find(
+          (workspace) => workspace.name === input.name || workspace.root === canonical,
+        );
       ensure(
         !existing,
         409,
@@ -181,7 +191,12 @@ export class Gateway extends EventEmitter {
     const found = this.store
       .list<Workspace>("workspace")
       .find((workspace) => workspace.id === ref || workspace.name === ref);
-    ensure(found, 404, "NOT_FOUND", `No workspace named "${ref}". Add one with \`portrail workspace add\`.`);
+    ensure(
+      found,
+      404,
+      "NOT_FOUND",
+      `No workspace named "${ref}". Add one with \`portrail workspace add\`.`,
+    );
     return found;
   }
 
@@ -189,19 +204,30 @@ export class Gateway extends EventEmitter {
     const workspace = this.workspace(ref);
     const active = this.store
       .list<SessionRecord>("session")
-      .filter((session) => session.workspaceId === workspace.id && session.state === "open")
+      .filter(
+        (session) => session.workspaceId === workspace.id && session.state === "open",
+      )
       .some((session) =>
         this.store
           .list<RunRecord>("run", session.id)
           .some((run) => !TERMINAL_STATES.has(run.state)),
       );
-    ensure(!active, 409, "BUSY", "A run is active in this workspace. Wait or cancel it first.");
+    ensure(
+      !active,
+      409,
+      "BUSY",
+      "A run is active in this workspace. Wait or cancel it first.",
+    );
     this.store.remove("workspace", workspace.id);
   }
 
   // ------------------------------------------------------------- sessions
 
-  createSession(input: { workspace: string; agent: AgentId; keyId?: string | null }): SessionRecord {
+  createSession(input: {
+    workspace: string;
+    agent: AgentId;
+    keyId?: string | null;
+  }): SessionRecord {
     const workspace = this.workspace(input.workspace);
     ensure(
       this.providers.has(input.agent),
@@ -283,7 +309,12 @@ export class Gateway extends EventEmitter {
             : "This session is closed.",
         );
       } else {
-        ensure(input.workspace, 400, "INVALID_REQUEST", "Give a workspace or a session.");
+        ensure(
+          input.workspace,
+          400,
+          "INVALID_REQUEST",
+          "Give a workspace or a session.",
+        );
         ensure(input.agent, 400, "INVALID_REQUEST", "Give an agent (codex or claude).");
         session = this.createSession({
           workspace: input.workspace,
@@ -297,7 +328,9 @@ export class Gateway extends EventEmitter {
         .some((run) => !TERMINAL_STATES.has(run.state));
       ensure(!active, 409, "BUSY", "This session already has a run in progress.");
 
-      const queued = this.store.list<RunRecord>("run").filter((run) => run.state === "queued");
+      const queued = this.store
+        .list<RunRecord>("run")
+        .filter((run) => run.state === "queued");
       ensure(
         queued.length < this.options.maxQueued,
         429,
@@ -307,15 +340,27 @@ export class Gateway extends EventEmitter {
 
       const maxSeconds = input.maxSeconds ?? this.options.defaultMaxSeconds;
       ensure(
-        Number.isInteger(maxSeconds) && maxSeconds >= RUN_MAX_SECONDS.min && maxSeconds <= RUN_MAX_SECONDS.max,
+        Number.isInteger(maxSeconds) &&
+          maxSeconds >= RUN_MAX_SECONDS.min &&
+          maxSeconds <= RUN_MAX_SECONDS.max,
         400,
         "INVALID_REQUEST",
         `maxSeconds must be between ${RUN_MAX_SECONDS.min} and ${RUN_MAX_SECONDS.max}.`,
       );
 
       if (input.id) {
-        ensure(/^run_[A-Za-z0-9-]{8,80}$/.test(input.id), 400, "INVALID_REQUEST", "A run id must look like run_….");
-        ensure(!this.store.get("run", input.id), 409, "ALREADY_EXISTS", "A run with that id already exists.");
+        ensure(
+          /^run_[A-Za-z0-9-]{8,80}$/.test(input.id),
+          400,
+          "INVALID_REQUEST",
+          "A run id must look like run_….",
+        );
+        ensure(
+          !this.store.get("run", input.id),
+          409,
+          "ALREADY_EXISTS",
+          "A run with that id already exists.",
+        );
       }
       const created = Date.now();
       const run = this.store.put<RunRecord>("run", {
@@ -337,7 +382,12 @@ export class Gateway extends EventEmitter {
         operationIds: [],
         metadata: input.metadata ?? {},
       });
-      this.emitEvent(session.id, "run.queued", { runId: run.id, metadata: run.metadata }, run.id);
+      this.emitEvent(
+        session.id,
+        "run.queued",
+        { runId: run.id, metadata: run.metadata },
+        run.id,
+      );
       this.store.afterCommit(() => void this.pump());
       return run;
     });
@@ -374,7 +424,8 @@ export class Gateway extends EventEmitter {
       });
       if (state === "outcome_unknown") {
         const session = this.store.get<SessionRecord>("session", run.sessionId);
-        if (session) this.store.put("session", { ...session, state: "attention_required" });
+        if (session)
+          this.store.put("session", { ...session, state: "attention_required" });
       }
       this.emitEvent(
         run.sessionId,
@@ -386,7 +437,9 @@ export class Gateway extends EventEmitter {
         },
         runId,
       );
-      this.parking.drain("The run ended before a decision arrived.", (operationId) => this.belongsTo(operationId, runId));
+      this.parking.drain("The run ended before a decision arrived.", (operationId) =>
+        this.belongsTo(operationId, runId),
+      );
     });
   }
 
@@ -396,14 +449,24 @@ export class Gateway extends EventEmitter {
     if (this.pumping || this.closing) return;
     this.pumping = true;
     try {
-      for (const run of this.store.list<RunRecord>("run").filter((r) => r.state === "queued")) {
+      for (const run of this.store
+        .list<RunRecord>("run")
+        .filter((r) => r.state === "queued")) {
         if (this.workers.size >= this.options.maxConcurrent) break;
         const session = this.store.get<SessionRecord>("session", run.sessionId);
         if (!session || session.state !== "open") {
-          this.finish(run.id, "cancelled", "The session closed before the run started.");
+          this.finish(
+            run.id,
+            "cancelled",
+            "The session closed before the run started.",
+          );
           continue;
         }
-        const worker: Worker = { epoch: newId("wrk"), abort: new AbortController(), handle: null };
+        const worker: Worker = {
+          epoch: newId("wrk"),
+          abort: new AbortController(),
+          handle: null,
+        };
         this.workers.set(run.id, worker);
         const task = this.execute(run, session, worker)
           .catch((error: Error) =>
@@ -434,7 +497,11 @@ export class Gateway extends EventEmitter {
     }
 
     this.store.tx(() => {
-      this.store.put("run", { ...this.run(run.id), workerEpoch: worker.epoch, startedAt: now() });
+      this.store.put("run", {
+        ...this.run(run.id),
+        workerEpoch: worker.epoch,
+        startedAt: now(),
+      });
       this.setState(run.id, "starting");
     });
 
@@ -532,7 +599,13 @@ export class Gateway extends EventEmitter {
       batcher.flush();
       // When the provider lost the agent, its account of that is the summary: partial
       // output would read like a result.
-      this.finish(run.id, outcome.state, outcome.state === "outcome_unknown" ? outcome.summary : output.trim() || outcome.summary);
+      this.finish(
+        run.id,
+        outcome.state,
+        outcome.state === "outcome_unknown"
+          ? outcome.summary
+          : output.trim() || outcome.summary,
+      );
     } catch (error) {
       batcher.flush();
       const message = (error as Error).message ?? "The agent failed.";
@@ -554,7 +627,11 @@ export class Gateway extends EventEmitter {
       this.store.tx(() => {
         for (const operation of this.store
           .list<OperationRecord>("operation", session.id)
-          .filter((op) => op.runId === run.id && (op.state === "pending" || op.state === "deciding")))
+          .filter(
+            (op) =>
+              op.runId === run.id &&
+              (op.state === "pending" || op.state === "deciding"),
+          ))
           this.store.put("operation", { ...operation, state: "expired" });
       });
     }
@@ -610,7 +687,10 @@ export class Gateway extends EventEmitter {
     };
     this.store.tx(() => {
       this.store.put("operation", record);
-      this.store.put("run", { ...this.run(runId), operationIds: [...run.operationIds, operation.id] });
+      this.store.put("run", {
+        ...this.run(runId),
+        operationIds: [...run.operationIds, operation.id],
+      });
       this.emitEvent(run.sessionId, "operation.requested", { operation }, runId);
     });
 
@@ -619,7 +699,9 @@ export class Gateway extends EventEmitter {
         const current = this.store.get<OperationRecord>("operation", operation.id);
         if (!current || current.state === "decided") return;
         const latest = this.run(runId);
-        const counts = { ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }) };
+        const counts = {
+          ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }),
+        };
         counts.total += 1;
         if (decision.verdict === "allow") counts.allowed += 1;
         else counts.denied += 1;
@@ -634,7 +716,13 @@ export class Gateway extends EventEmitter {
         this.emitEvent(
           run.sessionId,
           "operation.decided",
-          { operationId: operation.id, verdict: decision.verdict, reason: decision.reason, rule: decision.rule ?? null, decidedBy },
+          {
+            operationId: operation.id,
+            verdict: decision.verdict,
+            reason: decision.reason,
+            rule: decision.rule ?? null,
+            decidedBy,
+          },
           runId,
         );
       });
@@ -646,10 +734,15 @@ export class Gateway extends EventEmitter {
     // containment check and the rules see.
     const contained = containOperation(operation, workspace.root, this.options.dataDir);
     if (contained.refused)
-      return settle({ verdict: "deny", reason: contained.refused }, "portrail:containment");
+      return settle(
+        { verdict: "deny", reason: contained.refused },
+        "portrail:containment",
+      );
     operation = contained.operation;
 
-    const key = run.keyId ? this.store.get<{ policy?: unknown }>("key", run.keyId) : undefined;
+    const key = run.keyId
+      ? this.store.get<{ policy?: unknown }>("key", run.keyId)
+      : undefined;
     const context: DecisionContext = {
       keyId: run.keyId,
       keyPolicy: key?.policy ?? null,
@@ -660,7 +753,10 @@ export class Gateway extends EventEmitter {
       // by an earlier run of the same session. The decider chooses what carries.
       priorDecisions: this.store
         .list<OperationRecord>("operation", run.sessionId)
-        .filter((op) => op.decision && (op.runId === runId || op.decision.scope === "session"))
+        .filter(
+          (op) =>
+            op.decision && (op.runId === runId || op.decision.scope === "session"),
+        )
         .map((op) => ({ operation: op.operation, decision: op.decision! })),
     };
 
@@ -669,7 +765,8 @@ export class Gateway extends EventEmitter {
       decision = await this.decider.decide(operation, context);
       // The decider took its time; the run may have been cancelled meanwhile, and a
       // yes to a run that is over must never reach the agent.
-      if (decision.verdict !== "deny" && this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
+      if (decision.verdict !== "deny" && this.inactive(runId, workerEpoch))
+        return NOT_ACTIVE;
     } catch (error) {
       return settle(
         { verdict: "deny", reason: `The decider failed: ${(error as Error).message}` },
@@ -680,12 +777,20 @@ export class Gateway extends EventEmitter {
     if (decision.verdict !== "ask") return settle(decision, this.decider.name);
 
     // Park it. The run visibly waits, and whoever can answer is told.
-    const expiresAt = new Date(Date.now() + this.options.approvalTimeoutMs).toISOString();
+    const expiresAt = new Date(
+      Date.now() + this.options.approvalTimeoutMs,
+    ).toISOString();
     this.store.tx(() => {
       const current = this.store.get<OperationRecord>("operation", operation.id)!;
       this.store.put("operation", { ...current, state: "pending", expiresAt });
       const latest = this.run(runId);
-      this.store.put("run", { ...latest, operations: { ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }), asked: (latest.operations?.asked ?? 0) + 1 } });
+      this.store.put("run", {
+        ...latest,
+        operations: {
+          ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }),
+          asked: (latest.operations?.asked ?? 0) + 1,
+        },
+      });
       this.setState(runId, "waiting_for_approval");
       this.emitEvent(
         run.sessionId,
@@ -695,25 +800,36 @@ export class Gateway extends EventEmitter {
       );
     });
 
-    const answered = await this.parking.park(operation.id, this.options.approvalTimeoutMs, () => ({
-      verdict: "deny",
-      reason: "No decision arrived before the deadline. Refused to be safe.",
-    }));
+    const answered = await this.parking.park(
+      operation.id,
+      this.options.approvalTimeoutMs,
+      () => ({
+        verdict: "deny",
+        reason: "No decision arrived before the deadline. Refused to be safe.",
+      }),
+    );
 
-    if (answered.verdict === "allow" && this.inactive(runId, workerEpoch)) return NOT_ACTIVE;
-    const decidedBy = this.store.get<OperationRecord>("operation", operation.id)?.decidedBy;
+    if (answered.verdict === "allow" && this.inactive(runId, workerEpoch))
+      return NOT_ACTIVE;
+    const decidedBy = this.store.get<OperationRecord>(
+      "operation",
+      operation.id,
+    )?.decidedBy;
     this.store.tx(() => {
       const latest = this.run(runId);
       // A human's answer counts like any other decision: the run's tally is what
       // `portrail run` exits on and what an automation branches on.
-      const counts = { ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }) };
+      const counts = {
+        ...(latest.operations ?? { total: 0, allowed: 0, denied: 0, asked: 0 }),
+      };
       if (decidedBy) {
         counts.total += 1;
         if (answered.verdict === "allow") counts.allowed += 1;
         else counts.denied += 1;
       }
       this.store.put("run", { ...latest, operations: counts });
-      if (this.run(runId).state === "waiting_for_approval") this.setState(runId, "running");
+      if (this.run(runId).state === "waiting_for_approval")
+        this.setState(runId, "running");
     });
     return decidedBy ? answered : settle(answered, "portrail:timeout");
   }
@@ -722,8 +838,18 @@ export class Gateway extends EventEmitter {
   resolve(operationId: string, decision: Decision, actor: string) {
     const record = this.store.get<OperationRecord>("operation", operationId);
     ensure(record, 404, "NOT_FOUND", "Operation not found.");
-    ensure(record.state === "pending", 409, "NOT_PENDING", "This operation is not waiting for a decision.");
-    ensure(decision.verdict !== "ask", 400, "INVALID_REQUEST", "Resolve with allow or deny.");
+    ensure(
+      record.state === "pending",
+      409,
+      "NOT_PENDING",
+      "This operation is not waiting for a decision.",
+    );
+    ensure(
+      decision.verdict !== "ask",
+      400,
+      "INVALID_REQUEST",
+      "Resolve with allow or deny.",
+    );
     this.store.tx(() => {
       this.store.put("operation", {
         ...record,
@@ -735,7 +861,13 @@ export class Gateway extends EventEmitter {
       this.emitEvent(
         record.sessionId,
         "operation.decided",
-        { operationId, verdict: decision.verdict, reason: decision.reason, rule: decision.rule ?? null, decidedBy: actor },
+        {
+          operationId,
+          verdict: decision.verdict,
+          reason: decision.reason,
+          rule: decision.rule ?? null,
+          decidedBy: actor,
+        },
         record.runId,
       );
     });
@@ -744,10 +876,16 @@ export class Gateway extends EventEmitter {
       fail(409, "NOT_PENDING", "The run stopped waiting before this decision arrived.");
   }
 
-  listOperations(filter: { runId?: string; state?: OperationRecord["state"] } = {}): OperationRecord[] {
+  listOperations(
+    filter: { runId?: string; state?: OperationRecord["state"] } = {},
+  ): OperationRecord[] {
     return this.store
       .list<OperationRecord>("operation")
-      .filter((op) => (!filter.runId || op.runId === filter.runId) && (!filter.state || op.state === filter.state))
+      .filter(
+        (op) =>
+          (!filter.runId || op.runId === filter.runId) &&
+          (!filter.state || op.state === filter.state),
+      )
       .reverse();
   }
 
@@ -763,7 +901,9 @@ export class Gateway extends EventEmitter {
     }
     this.store.put("run", { ...run, cancellationRequested: true });
     this.setState(runId, "cancelling");
-    this.parking.drain("The run was cancelled.", (operationId) => this.belongsTo(operationId, runId));
+    this.parking.drain("The run was cancelled.", (operationId) =>
+      this.belongsTo(operationId, runId),
+    );
     worker.abort.abort();
     await worker.handle?.interrupt().catch(() => {});
 
@@ -779,11 +919,17 @@ export class Gateway extends EventEmitter {
   }
 
   async steer(runId: string, text: string): Promise<void> {
-    ensure(typeof text === "string" && text.trim(), 400, "INVALID_REQUEST", "Text is required.");
+    ensure(
+      typeof text === "string" && text.trim(),
+      400,
+      "INVALID_REQUEST",
+      "Text is required.",
+    );
     const run = this.run(runId);
     const worker = this.workers.get(runId);
     ensure(
-      worker?.handle && (run.state === "running" || run.state === "waiting_for_approval"),
+      worker?.handle &&
+        (run.state === "running" || run.state === "waiting_for_approval"),
       409,
       "NOT_RUNNING",
       "Only a running run can be steered.",
@@ -799,7 +945,12 @@ export class Gateway extends EventEmitter {
     this.store.tx(() => {
       for (const session of this.store.list<SessionRecord>("session")) {
         const runs = this.store.list<RunRecord>("run", session.id);
-        if (runs.some((run) => !TERMINAL_STATES.has(run.state) || this.workers.has(run.id))) continue;
+        if (
+          runs.some(
+            (run) => !TERMINAL_STATES.has(run.state) || this.workers.has(run.id),
+          )
+        )
+          continue;
         if (session.lastActivityAt >= cutoff) continue;
         for (const run of runs) this.store.remove("run", run.id);
         for (const op of this.store.list<OperationRecord>("operation", session.id))
@@ -807,9 +958,7 @@ export class Gateway extends EventEmitter {
         this.store.db.prepare("DELETE FROM events WHERE session_id=?").run(session.id);
         this.store.remove("session", session.id);
       }
-      this.store.db
-        .prepare("DELETE FROM commands WHERE created_at<?")
-        .run(cutoff);
+      this.store.db.prepare("DELETE FROM commands WHERE created_at<?").run(cutoff);
     });
   }
 
@@ -836,7 +985,11 @@ export class Gateway extends EventEmitter {
     await Promise.race([settled, grace]);
     for (const [runId, worker] of this.workers) {
       worker.handle?.close(true);
-      this.finish(runId, "outcome_unknown", "Portrail stopped before the agent confirmed completion.");
+      this.finish(
+        runId,
+        "outcome_unknown",
+        "Portrail stopped before the agent confirmed completion.",
+      );
     }
     this.workers.clear();
   }
@@ -865,7 +1018,15 @@ function safeRealpath(path: string): string {
 }
 
 /** Device files a command may name without the workspace being a question. */
-const DEVICES = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/zero", "/dev/random", "/dev/urandom"]);
+const DEVICES = new Set([
+  "/dev/null",
+  "/dev/stdin",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/zero",
+  "/dev/random",
+  "/dev/urandom",
+]);
 
 /**
  * The pieces of one word that could name something on disk: the word itself, what
@@ -922,13 +1083,26 @@ export function judgeCommandPaths(
         try {
           canonical = canonicalPath(cwd, candidate);
         } catch {
-          return { refused: `Refused: the command names ${part}, which could not be resolved.`, paths: [] };
+          return {
+            refused: `Refused: the command names ${part}, which could not be resolved.`,
+            paths: [],
+          };
         }
-        if (protectedList.some((p) => isWithinFold(canonical, p) || isWithinFold(p, canonical)))
-          return { refused: `Refused: the command touches ${part}, which is protected everywhere.`, paths: [] };
+        if (
+          protectedList.some(
+            (p) => isWithinFold(canonical, p) || isWithinFold(p, canonical),
+          )
+        )
+          return {
+            refused: `Refused: the command touches ${part}, which is protected everywhere.`,
+            paths: [],
+          };
         if (DEVICES.has(canonical) || index === segment.programIndex) continue;
         if (!isWithin(canonical, root))
-          return { refused: `Refused: the command names ${part}, which resolves outside the workspace (${canonical}).`, paths: [] };
+          return {
+            refused: `Refused: the command names ${part}, which resolves outside the workspace (${canonical}).`,
+            paths: [],
+          };
         try {
           lstatSync(canonical);
           paths.add(canonical);
@@ -955,25 +1129,38 @@ export function containOperation(
   const root = safeRealpath(declaredRoot);
   const protectedList = protectedPaths(dataDir);
   const check = (declared: string): { canonical: string; refused: string | null } => {
-    if (!declared) return { canonical: declared, refused: `Refused: an empty path was declared.` };
+    if (!declared)
+      return { canonical: declared, refused: `Refused: an empty path was declared.` };
     let canonical: string;
     try {
       canonical = canonicalPath(root, declared);
     } catch {
-      return { canonical: declared, refused: `Refused: ${declared} could not be resolved.` };
+      return {
+        canonical: declared,
+        refused: `Refused: ${declared} could not be resolved.`,
+      };
     }
-    if (!isWithin(canonical, root)) return { canonical, refused: `Refused: ${declared} resolves outside the workspace (${canonical}).` };
+    if (!isWithin(canonical, root))
+      return {
+        canonical,
+        refused: `Refused: ${declared} resolves outside the workspace (${canonical}).`,
+      };
     const hit = protectedList.find((p) => isWithinFold(canonical, p));
-    if (hit) return { canonical, refused: `Refused: ${declared} is inside a protected directory (${hit}).` };
+    if (hit)
+      return {
+        canonical,
+        refused: `Refused: ${declared} is inside a protected directory (${hit}).`,
+      };
     return { canonical, refused: null };
   };
 
   if (operation.kind === "write") {
-    if (!operation.changes.length) return { operation, refused: "Refused: a write with no files declared." , root };
+    if (!operation.changes.length)
+      return { operation, refused: "Refused: a write with no files declared.", root };
     const changes = [];
     for (const change of operation.changes) {
       const result = check(change.path);
-      if (result.refused) return { operation, refused: result.refused , root };
+      if (result.refused) return { operation, refused: result.refused, root };
       changes.push({ ...change, path: result.canonical });
     }
     return { operation: { ...operation, changes }, refused: null, root };
@@ -982,49 +1169,87 @@ export function containOperation(
     const paths = [];
     for (const path of operation.paths) {
       const result = check(path);
-      if (result.refused) return { operation, refused: result.refused , root };
+      if (result.refused) return { operation, refused: result.refused, root };
       paths.push(result.canonical);
     }
     return { operation: { ...operation, paths }, refused: null, root };
   }
   if (operation.kind === "exec") {
-    if (!operation.command.trim()) return { operation, refused: "Refused: an empty command." , root };
+    if (!operation.command.trim())
+      return { operation, refused: "Refused: an empty command.", root };
     // The directory a command runs in decides what its relative paths mean.
     const cwd = check(operation.cwd || ".");
-    if (cwd.refused) return { operation, refused: cwd.refused.replace(/^Refused: /, "Refused: the working directory ") , root };
+    if (cwd.refused)
+      return {
+        operation,
+        refused: cwd.refused.replace(/^Refused: /, "Refused: the working directory "),
+        root,
+      };
     // Rules match a command as text, so what text cannot express is refused here,
     // before any decider — and every path the command names is resolved against the
     // working directory and held to the workspace and the protected list, the one
     // place that knows what the text points at.
     const { segments, unjudgeable } = parseCommand(operation.command);
-    if (unjudgeable) return { operation, refused: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`, root };
+    if (unjudgeable)
+      return {
+        operation,
+        refused: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
+        root,
+      };
     const named = judgeCommandPaths(segments, cwd.canonical, root, protectedList);
     if (named.refused) return { operation, refused: named.refused, root };
-    return { operation: { ...operation, cwd: cwd.canonical, paths: named.paths }, refused: null, root };
+    return {
+      operation: { ...operation, cwd: cwd.canonical, paths: named.paths },
+      refused: null,
+      root,
+    };
   }
   if (operation.kind === "net" && !operation.host && !operation.url)
-    return { operation, refused: "Refused: a network operation with no destination." , root };
+    return {
+      operation,
+      refused: "Refused: a network operation with no destination.",
+      root,
+    };
   return { operation, refused: null, root };
 }
 
 /** Where the operating system keeps itself; nothing there is anyone's project. */
 const SYSTEM_ROOTS = [
-  "/usr", "/etc", "/bin", "/sbin", "/opt", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev", "/root", "/cores",
-  "/System", "/Library", "/Applications", "/private/etc",
+  "/usr",
+  "/etc",
+  "/bin",
+  "/sbin",
+  "/opt",
+  "/lib",
+  "/lib64",
+  "/boot",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/root",
+  "/cores",
+  "/System",
+  "/Library",
+  "/Applications",
+  "/private/etc",
 ];
 
 /** Why a directory may not become a workspace, or null. */
 export function refuseWorkspaceRoot(declared: string, dataDir?: string): string | null {
   const canonical = safeRealpath(declared);
   const home = safeRealpath(homedir());
-  if (canonical === "/" || canonical === dirname(canonical)) return "The filesystem root cannot be a workspace.";
+  if (canonical === "/" || canonical === dirname(canonical))
+    return "The filesystem root cannot be a workspace.";
   if (SYSTEM_ROOTS.some((system) => isWithin(canonical, safeRealpath(system))))
     return "A system directory cannot be a workspace. Choose a project folder.";
-  if (canonical === home) return "Your home directory cannot be a workspace. Enrol a project folder inside it.";
-  if (isWithin(home, canonical)) return "A directory above your home directory cannot be a workspace.";
+  if (canonical === home)
+    return "Your home directory cannot be a workspace. Enrol a project folder inside it.";
+  if (isWithin(home, canonical))
+    return "A directory above your home directory cannot be a workspace.";
   for (const p of protectedPaths(dataDir))
     if (isWithinFold(p, canonical) || isWithinFold(canonical, p))
       return `${canonical} contains or lies inside a protected directory (${p}). Choose a project folder.`;
-  if (existsSync(join(canonical, ".portrail"))) return `${canonical} contains a .portrail directory. Choose a project folder.`;
+  if (existsSync(join(canonical, ".portrail")))
+    return `${canonical} contains a .portrail directory. Choose a project folder.`;
   return null;
 }

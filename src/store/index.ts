@@ -1,12 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  createHash,
-  randomBytes,
-  randomUUID,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 export const id = (prefix: string) => `${prefix}_${randomUUID()}`;
 export const secret = () => randomBytes(32).toString("base64url");
@@ -27,9 +22,7 @@ export function canonical(value: unknown): string {
 export const digest = (value: unknown) =>
   createHash("sha256")
     .update(
-      typeof value === "string" || Buffer.isBuffer(value)
-        ? value
-        : canonical(value),
+      typeof value === "string" || Buffer.isBuffer(value) ? value : canonical(value),
     )
     .digest("hex");
 
@@ -114,7 +107,8 @@ export class Store {
     }
     this.db.exec(SCHEMA);
 
-    if (!this.get("meta", "install")) this.put("meta", { id: "install", createdAt: now() });
+    if (!this.get("meta", "install"))
+      this.put("meta", { id: "install", createdAt: now() });
   }
 
   /**

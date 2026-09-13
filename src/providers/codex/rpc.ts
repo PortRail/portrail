@@ -45,7 +45,11 @@ export class CodexRpc extends EventEmitter {
   readonly child: ChildProcessWithoutNullStreams;
   private pending = new Map<
     number,
-    { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+    {
+      resolve: (value: any) => void;
+      reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
+    }
   >();
   private seq = 0;
   private faulted = false;
@@ -187,7 +191,9 @@ export class CodexRpc extends EventEmitter {
     if (this.closed || this.faulted)
       return Promise.reject(new Error("The agent connection is closed."));
     if (process.env.PORTRAIL_DEBUG_RPC)
-      process.stderr.write(`[rpc->] ${method} ${JSON.stringify(params ?? "").slice(0, 300)}\n`);
+      process.stderr.write(
+        `[rpc->] ${method} ${JSON.stringify(params ?? "").slice(0, 300)}\n`,
+      );
 
     return new Promise<T>((resolve, reject) => {
       const id = ++this.seq;
@@ -249,7 +255,8 @@ function isEnvelope(message: unknown): message is RpcMessage {
 
   // A response must have an id and exactly one of result or error.
   if (envelope.id === undefined) return false;
-  if (Object.hasOwn(envelope, "result") === Object.hasOwn(envelope, "error")) return false;
+  if (Object.hasOwn(envelope, "result") === Object.hasOwn(envelope, "error"))
+    return false;
   if (Object.hasOwn(envelope, "error")) {
     const error = envelope.error;
     return (

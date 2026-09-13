@@ -18,7 +18,11 @@ const TUNNELS: Array<{ kind: TunnelKind; binary: string; note: string }> = [
     binary: "cloudflared",
     note: "Free. Random URL per start; a named tunnel gives a permanent one.",
   },
-  { kind: "ngrok", binary: "ngrok", note: "Free tier gives a random URL; paid plans give a fixed one." },
+  {
+    kind: "ngrok",
+    binary: "ngrok",
+    note: "Free tier gives a random URL; paid plans give a fixed one.",
+  },
   {
     kind: "tailscale",
     binary: "tailscale",
@@ -57,11 +61,16 @@ export function openTunnel(
   options: { timeoutMs?: number; onLog?: (line: string) => void } = {},
 ): Promise<Tunnel> {
   const spec = TUNNELS.find((entry) => entry.kind === kind);
-  if (!spec) return Promise.reject(new Error(`Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`));
+  if (!spec)
+    return Promise.reject(
+      new Error(`Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`),
+    );
   const found = findExecutable(spec.binary);
   if (!found)
     return Promise.reject(
-      new Error(`${spec.binary} is not installed. Install it, or choose another tunnel.`),
+      new Error(
+        `${spec.binary} is not installed. Install it, or choose another tunnel.`,
+      ),
     );
 
   const args =
@@ -71,7 +80,9 @@ export function openTunnel(
         ? ["http", String(port), "--log", "stdout", "--log-format", "logfmt"]
         : ["funnel", String(port)];
 
-  const child: ChildProcess = spawn(found.path, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const child: ChildProcess = spawn(found.path, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const pattern =
     kind === "cloudflare"
       ? /https:\/\/[a-z0-9-]+\.trycloudflare\.com/
@@ -82,7 +93,11 @@ export function openTunnel(
   return new Promise<Tunnel>((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`${spec.binary} did not report a public URL within ${(options.timeoutMs ?? 30_000) / 1000}s.`));
+      reject(
+        new Error(
+          `${spec.binary} did not report a public URL within ${(options.timeoutMs ?? 30_000) / 1000}s.`,
+        ),
+      );
     }, options.timeoutMs ?? 30_000);
     let settled = false;
     const handle = (chunk: Buffer) => {
@@ -106,7 +121,10 @@ export function openTunnel(
     });
     child.on("exit", (code) => {
       clearTimeout(timer);
-      if (!settled) reject(new Error(`${spec.binary} exited with code ${code} before reporting a URL.`));
+      if (!settled)
+        reject(
+          new Error(`${spec.binary} exited with code ${code} before reporting a URL.`),
+        );
     });
   });
 }

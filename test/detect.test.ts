@@ -26,7 +26,10 @@ test("an agent hidden by a Node version switch is still found", () => {
   process.env.HOME = home;
   try {
     // PATH may already carry an nvm bin; what matters is that the version directories under HOME are added.
-    assert.ok(candidateDirectories().includes(bin), "every nvm version's bin directory under HOME is searched");
+    assert.ok(
+      candidateDirectories().includes(bin),
+      "every nvm version's bin directory under HOME is searched",
+    );
   } finally {
     process.env.HOME = previous;
   }

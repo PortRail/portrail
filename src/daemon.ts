@@ -50,23 +50,35 @@ export interface Daemon {
 export const databasePath = (dataDir: string) => resolve(dataDir, "portrail.sqlite");
 
 /** Build everything but do not listen yet. */
-export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon, "url">> {
+export async function assemble(
+  options: DaemonOptions = {},
+): Promise<Omit<Daemon, "url">> {
   const dataDir = ensurePrivateDirectory(dataDirectory(options.home));
   const config = loadConfig(dataDir);
   // Before the store is opened: a load failure throws, and must leave nothing open behind it.
-  const loaded = options.noExtension ? { extension: null, detail: "disabled" } : await loadExtension();
+  const loaded = options.noExtension
+    ? { extension: null, detail: "disabled" }
+    : await loadExtension();
   const extension = loaded.extension;
   const store = new Store(databasePath(dataDir));
   const keys = new Keys(store);
 
   const providers = new Map<AgentId, Provider>();
-  providers.set("codex", new CodexProvider({ executablePath: config.agents.codex.path, dataDir }));
-  providers.set("claude", new ClaudeProvider({
-    executablePath: config.agents.claude.path,
-    maxBudgetUsd: config.run.maxBudgetUsd,
-    sandbox: config.agents.claude.sandbox,
-    denyRead: config.decide.deny.filter((rule) => rule.startsWith("read:")).map((rule) => rule.slice("read:".length)),
-  }));
+  providers.set(
+    "codex",
+    new CodexProvider({ executablePath: config.agents.codex.path, dataDir }),
+  );
+  providers.set(
+    "claude",
+    new ClaudeProvider({
+      executablePath: config.agents.claude.path,
+      maxBudgetUsd: config.run.maxBudgetUsd,
+      sandbox: config.agents.claude.sandbox,
+      denyRead: config.decide.deny
+        .filter((rule) => rule.startsWith("read:"))
+        .map((rule) => rule.slice("read:".length)),
+    }),
+  );
   if (options.fake) providers.set("fake", new FakeProvider());
 
   // Flags the core does not know belong to an extension. Without one, say so
@@ -98,7 +110,8 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
     store,
     gateway,
     options: options.extensionOptions ?? {},
-    resolve: (operationId, decision, actor) => gateway.resolve(operationId, decision, actor),
+    resolve: (operationId, decision, actor) =>
+      gateway.resolve(operationId, decision, actor),
   };
   const decider = extension?.decider?.(host) ?? null;
   if (decider) gateway.useDecider(decider);
@@ -110,7 +123,9 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
       try {
         onEvent(event);
       } catch (error) {
-        console.error(`${name}: onEvent failed for ${event.type}: ${(error as Error).message}`);
+        console.error(
+          `${name}: onEvent failed for ${event.type}: ${(error as Error).message}`,
+        );
       }
     });
   }
@@ -118,14 +133,23 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
   // Shallow probes only, so nothing periodic (health checks, the CLI) ever costs inference.
   let cachedAgents: { at: number; value: ProviderStatus[] } | null = null;
   const agents = async (deep = false) => {
-    if (deep) return Promise.all([...providers.values()].map((provider) => provider.probe({ deep: true })));
-    if (cachedAgents && Date.now() - cachedAgents.at < 60_000) return cachedAgents.value;
-    const value = await Promise.all([...providers.values()].map((provider) => provider.probe()));
+    if (deep)
+      return Promise.all(
+        [...providers.values()].map((provider) => provider.probe({ deep: true })),
+      );
+    if (cachedAgents && Date.now() - cachedAgents.at < 60_000)
+      return cachedAgents.value;
+    const value = await Promise.all(
+      [...providers.values()].map((provider) => provider.probe()),
+    );
     cachedAgents = { at: Date.now(), value };
     return value;
   };
 
-  const tls = config.tls.cert && config.tls.key ? { cert: config.tls.cert, key: config.tls.key } : null;
+  const tls =
+    config.tls.cert && config.tls.key
+      ? { cert: config.tls.cert, key: config.tls.key }
+      : null;
   const localToken = secret();
   const app = await createApp({
     gateway,
@@ -140,7 +164,10 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
     agentStatus: agents,
   });
 
-  const retention = setInterval(() => gateway.retention(config.retentionDays), 60 * 60 * 1000);
+  const retention = setInterval(
+    () => gateway.retention(config.retentionDays),
+    60 * 60 * 1000,
+  );
   retention.unref();
 
   return {
@@ -179,7 +206,10 @@ function acquireLock(dataDir: string): { release(): void } {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
     }
-    if (alive) throw new Error(`Another Portrail is already running from ${dataDir} (pid ${pid}).`);
+    if (alive)
+      throw new Error(
+        `Another Portrail is already running from ${dataDir} (pid ${pid}).`,
+      );
     unlinkSync(path);
   }
   writeFileSync(path, String(process.pid), { mode: 0o600, flag: "wx" });
@@ -221,7 +251,16 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
     const boundPort = typeof address === "object" && address ? address.port : port;
     const url = `${tls ? "https" : "http"}://${host.includes(":") ? `[${host}]` : host}:${boundPort}`;
     const info = resolve(dataDir, "daemon.json");
-    writeFileSync(info, JSON.stringify({ url, pid: process.pid, startedAt: new Date().toISOString(), localToken: daemon.localToken }), { mode: 0o600 });
+    writeFileSync(
+      info,
+      JSON.stringify({
+        url,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        localToken: daemon.localToken,
+      }),
+      { mode: 0o600 },
+    );
     await daemon.extension?.start?.(daemon.host, { url });
     const built = daemon;
     return {
@@ -241,11 +280,17 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
 }
 
 /** Where a running daemon says it is, if one is running. */
-export function runningDaemon(dataDir: string): { url: string; pid: number; localToken?: string } | null {
+export function runningDaemon(
+  dataDir: string,
+): { url: string; pid: number; localToken?: string } | null {
   const path = resolve(dataDir, "daemon.json");
   if (!existsSync(path)) return null;
   try {
-    const info = JSON.parse(readFileSync(path, "utf8")) as { url: string; pid: number; localToken?: string };
+    const info = JSON.parse(readFileSync(path, "utf8")) as {
+      url: string;
+      pid: number;
+      localToken?: string;
+    };
     process.kill(info.pid, 0);
     return info;
   } catch {

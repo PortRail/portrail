@@ -43,7 +43,8 @@ export class Keys {
     policy?: unknown;
   }): { key: KeyRecord; token: string } {
     ensure(
-      typeof input.name === "string" && /^[a-z0-9][a-z0-9-_ .]{0,63}$/i.test(input.name),
+      typeof input.name === "string" &&
+        /^[a-z0-9][a-z0-9-_ .]{0,63}$/i.test(input.name),
       400,
       "INVALID_REQUEST",
       "Key name must be 1–64 characters: letters, digits, dashes, dots, spaces.",
@@ -52,7 +53,9 @@ export class Keys {
     ensure(
       Array.isArray(scopes) &&
         scopes.length > 0 &&
-        scopes.every((scope) => scope === "*" || (SCOPES as readonly string[]).includes(scope)),
+        scopes.every(
+          (scope) => scope === "*" || (SCOPES as readonly string[]).includes(scope),
+        ),
       400,
       "INVALID_REQUEST",
       `Scopes must be "*" or some of: ${SCOPES.join(", ")}.`,
@@ -100,13 +103,17 @@ export class Keys {
   /** Resolve a bearer token to a principal, or throw 401. */
   authenticate(token: string | undefined): Principal {
     ensure(
-      typeof token === "string" && token.startsWith(PREFIX) && token.length > PREFIX.length + 20,
+      typeof token === "string" &&
+        token.startsWith(PREFIX) &&
+        token.length > PREFIX.length + 20,
       401,
       "UNAUTHORIZED",
       "A valid API key is required. Send it as `Authorization: Bearer prt_...`.",
     );
     const hash = digest(token);
-    const key = this.store.list<KeyRecord>("key").find((candidate) => candidate.hash === hash);
+    const key = this.store
+      .list<KeyRecord>("key")
+      .find((candidate) => candidate.hash === hash);
     ensure(key, 401, "UNAUTHORIZED", "Unknown API key.");
     ensure(!key.revokedAt, 401, "KEY_REVOKED", "This API key was revoked.");
     ensure(
