@@ -63,21 +63,6 @@ export function parseCommand(command: string): { segments: CommandSegment[]; unj
   return { segments, unjudgeable: null };
 }
 
-/** The segments of a command line as text, or the reason the line cannot be judged. */
-export function commandSegments(command: string): { segments: string[]; unjudgeable: string | null } {
-  const parsed = parseCommand(command);
-  return { segments: parsed.unjudgeable ? [command.trim()] : parsed.segments.map((segment) => segment.text), unjudgeable: parsed.unjudgeable };
-}
-
-/**
- * Every segment of a command line as unquoted words, for anything that inspects
- * arguments — and the reason the line cannot be judged at all, if there is one.
- */
-export function commandWords(command: string): { words: string[][]; unjudgeable: string | null } {
-  const parsed = parseCommand(command);
-  return { words: parsed.segments.map((segment) => segment.words), unjudgeable: parsed.unjudgeable };
-}
-
 /** Shell keywords that may precede a command inside a compound. */
 const KEYWORDS = new Set(["if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"]);
 /** Wrappers that run their argument unchanged and take no options we can judge. */
