@@ -90,6 +90,14 @@ test("credential stores, tool logins and shell history are protected everywhere"
   assert.match(exec("cat ~/.config/gh/hosts.yml"), /protected everywhere/);
 });
 
+test("containment itself refuses an environment assignment that could change a command, so no decider can allow it", () => {
+  const root = realTmp("ws-");
+  const exec = (command: string) => containOperation({ ...base, kind: "exec", command, cwd: root }, root).refused;
+  for (const command of ["NODE_OPTIONS=--require=./hook.cjs npm test", "env FOO=1 npm test", "PATH=/x npm test", "env -S 'npm test'"])
+    assert.match(exec(command) ?? "", /environment assignment|options to env/, command);
+  for (const command of ["CI=1 npm test", "env CI=1 npm test", "npm test"]) assert.equal(exec(command), null, command);
+});
+
 test("even inside an enrolled workspace, the agent's own config and secrets are off limits", () => {
   // Simulate a broad enrolment by pretending home is the root; protected paths still refuse.
   const root = homedir();
