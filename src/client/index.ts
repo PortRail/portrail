@@ -11,6 +11,22 @@ export interface PortrailClientOptions {
   timeoutMs?: number;
 }
 
+/** A pause that an abort ends at once, leaving no listener behind either way. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export class PortrailClientError extends Error {
   constructor(
     readonly status: number,
@@ -112,14 +128,17 @@ export class PortrailClient {
     const method = init.method ?? "GET";
     const headers: Record<string, string> = { Authorization: `Bearer ${this.options.token}` };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
-    if (method === "POST") headers["Idempotency-Key"] = init.idempotencyKey ?? crypto.randomUUID();
+    // Only run creation is replayed safely by the server; a key must never be minted from a stored response.
+    if (init.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
 
+    // A caller's signal adds a way to stop; it never removes the timeout.
+    const timeout = AbortSignal.timeout(init.timeoutMs ?? this.options.timeoutMs ?? 30_000);
     const response = await (this.options.fetch ?? fetch)(`${this.base}/v1${path}`, {
       method,
       headers,
       redirect: "error",
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: init.signal ?? AbortSignal.timeout(init.timeoutMs ?? this.options.timeoutMs ?? 30_000),
+      signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
     });
     if (response.status === 204) return undefined as T;
     const text = await response.text();
@@ -152,7 +171,7 @@ export class PortrailClient {
       this.request<Run>("/runs", {
         method: "POST",
         body: input,
-        idempotencyKey: options.idempotencyKey,
+        idempotencyKey: options.idempotencyKey ?? crypto.randomUUID(),
         timeoutMs: (input.wait ?? 0) * 1000 + 30_000,
       }),
     get: (runId: string) => this.request<Run>(`/runs/${encodeURIComponent(runId)}`),
@@ -170,15 +189,10 @@ export class PortrailClient {
     /** Poll until the run ends. Prefer `events()` when you can hold a connection. */
     wait: async (runId: string, options: { intervalMs?: number; signal?: AbortSignal } = {}) => {
       for (;;) {
-        const run = await this.runs.get(runId);
+        options.signal?.throwIfAborted();
+        const run = await this.request<Run>(`/runs/${encodeURIComponent(runId)}`, { signal: options.signal });
         if (TERMINAL.has(run.state)) return run;
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, options.intervalMs ?? 2000);
-          options.signal?.addEventListener("abort", () => {
-            clearTimeout(timer);
-            reject(new Error("aborted"));
-          }, { once: true });
-        });
+        await sleep(options.intervalMs ?? 2000, options.signal);
       }
     },
     events: (runId: string, options: { after?: number; signal?: AbortSignal; reconnect?: boolean } = {}) =>
@@ -209,7 +223,7 @@ export class PortrailClient {
   };
 
   health() {
-    return (this.options.fetch ?? fetch)(`${this.base}/health`, { redirect: "error" }).then((r) => r.json());
+    return (this.options.fetch ?? fetch)(`${this.base}/health`, { redirect: "error", headers: { Authorization: `Bearer ${this.options.token}` } }).then((r) => r.json());
   }
 
   /** Resumable server-sent events with exponential backoff. */
@@ -219,12 +233,9 @@ export class PortrailClient {
   ): AsyncGenerator<PortrailEvent> {
     let after = options.after ?? 0;
     let attempt = 0;
+    // An abort simply ends the pause; the loop condition then exits.
     const pause = () =>
-      new Promise<void>((resolve) => {
-        const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6)) * (0.8 + Math.random() * 0.4);
-        const timer = setTimeout(resolve, delay);
-        options.signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-      });
+      sleep(Math.min(30_000, 500 * 2 ** Math.min(attempt++, 6)) * (0.8 + Math.random() * 0.4), options.signal).catch(() => {});
 
     while (!options.signal?.aborted) {
       let response: Response;
