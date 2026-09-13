@@ -154,10 +154,39 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
   };
 }
 
+/**
+ * Own the data directory or refuse. The lock is what makes this process the one
+ * that may reconcile runs, so it is taken before anything else touches the store.
+ */
+function acquireLock(dataDir: string): { release(): void } {
+  const path = resolve(dataDir, "daemon.lock");
+  if (existsSync(path)) {
+    const pid = Number(readFileSync(path, "utf8"));
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+    }
+    if (alive) throw new Error(`Another Portrail is already running from ${dataDir} (pid ${pid}).`);
+    unlinkSync(path);
+  }
+  writeFileSync(path, String(process.pid), { mode: 0o600, flag: "wx" });
+  return {
+    release() {
+      try {
+        if (readFileSync(path, "utf8") === String(process.pid)) unlinkSync(path);
+      } catch {
+        // Already gone.
+      }
+    },
+  };
+}
+
 /** Assemble and listen. This is `portrail start`. */
 export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> {
-  const daemon = await assemble(options);
-  const { config, dataDir } = daemon;
+  const dataDir = ensurePrivateDirectory(dataDirectory(options.home));
+  const config = loadConfig(dataDir);
   const host = options.host ?? config.listen.host;
   const port = options.port ?? config.listen.port;
   const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -167,46 +196,37 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<Daemon> 
       `Refusing to listen on ${host} without TLS. Configure tls.cert/tls.key, put Portrail behind a TLS proxy or tunnel, or pass --insecure if you understand that API keys would travel in the clear.`,
     );
 
-  if (!loopback && !tls)
-    console.error(
-      `WARNING: listening on ${host} without TLS because --insecure was given. API keys will travel in the clear. Use this only on a network you fully control.`,
-    );
-
-  const lock = resolve(dataDir, "daemon.lock");
-  if (existsSync(lock)) {
-    const pid = Number(readFileSync(lock, "utf8"));
-    let alive = true;
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
-    }
-    if (alive) throw new Error(`Another Portrail is already running from ${dataDir} (pid ${pid}).`);
-    unlinkSync(lock);
-  }
-  writeFileSync(lock, String(process.pid), { mode: 0o600, flag: "wx" });
-
+  const lock = acquireLock(dataDir);
+  let daemon: Omit<Daemon, "url"> | null = null;
   try {
+    // Recovery happens in here — under the lock, by the process that owns the runs.
+    daemon = await assemble({ ...options, home: dataDir });
+    if (!loopback && !tls)
+      console.error(
+        `WARNING: listening on ${host} without TLS because --insecure was given. API keys will travel in the clear. Use this only on a network you fully control.`,
+      );
     await daemon.app.listen({ host, port });
+    const address = daemon.app.server.address();
+    const boundPort = typeof address === "object" && address ? address.port : port;
+    const url = `${tls ? "https" : "http"}://${host.includes(":") ? `[${host}]` : host}:${boundPort}`;
+    const info = resolve(dataDir, "daemon.json");
+    writeFileSync(info, JSON.stringify({ url, pid: process.pid, startedAt: new Date().toISOString(), localToken: daemon.localToken }), { mode: 0o600 });
+    await daemon.extension?.start?.(daemon.host, { url });
+    const built = daemon;
+    return {
+      ...built,
+      url,
+      close: async () => {
+        await built.close();
+        if (existsSync(info)) unlinkSync(info);
+        lock.release();
+      },
+    };
   } catch (error) {
-    unlinkSync(lock);
-    await daemon.close();
+    await daemon?.close().catch(() => {});
+    lock.release();
     throw error;
   }
-  const url = `${tls ? "https" : "http"}://${host.includes(":") ? `[${host}]` : host}:${port}`;
-  writeFileSync(resolve(dataDir, "daemon.json"), JSON.stringify({ url, pid: process.pid, startedAt: new Date().toISOString(), localToken: daemon.localToken }), { mode: 0o600 });
-  await daemon.extension?.start?.(daemon.host, { url });
-
-  return {
-    ...daemon,
-    url,
-    close: async () => {
-      await daemon.close();
-      for (const file of [lock, resolve(dataDir, "daemon.json")])
-        if (existsSync(file) && (file !== lock || readFileSync(file, "utf8") === String(process.pid)))
-          unlinkSync(file);
-    },
-  };
 }
 
 /** Where a running daemon says it is, if one is running. */
