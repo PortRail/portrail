@@ -20,6 +20,18 @@ All notable changes to Portrail are recorded here. The format follows
   it (`TOO_MANY_FAILURES`, `Retry-After`); every failure is logged with the address, the
   code and the route. Forwarded addresses are believed only from a loopback peer.
 
+### Changed
+
+- Runs, operations and keys are found through indexed columns instead of reading every
+  record: creating a run, dispatching the queue, answering a permission question,
+  authenticating a key and listing runs or operations no longer slow down as history
+  grows. The database upgrades itself to schema 2 the first time it is opened; an older
+  Portrail then refuses to open it.
+- `GET /v1/runs` and `GET /v1/sessions` filter and page in the database; the response
+  shape is unchanged.
+- `portrail logs -f` follows one cursor over the event log instead of polling every
+  session.
+
 ## [0.1.1] — 2026-09-13
 
 Every change below was first reproduced by a failing test in the suite.
