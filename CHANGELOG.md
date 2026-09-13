@@ -3,6 +3,17 @@
 All notable changes to Portrail are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [Unreleased]
+
+### Security
+
+- A search that says what it opens is judged by that alone: `rg -g '*.ts'`, `rg -t ts`,
+  `grep -r --include='*.ts'` and Claude Code's Grep with `glob` or `type` are no longer
+  refused because of a `.env` they would never open. Portrail reads the filters the way
+  the tool does (last matching glob wins, slashless globs match at any depth, slashed
+  globs anchor to the working directory) and falls back to judging the whole directory
+  when it cannot be sure.
+
 ## [0.1.1] — 2026-09-13
 
 Every change below was first reproduced by a failing test in the suite.

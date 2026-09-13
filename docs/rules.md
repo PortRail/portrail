@@ -102,9 +102,16 @@ a command names is then judged by the `read:` deny rules under its real path, an
 search over a directory (`grep -r`, `rg`, `diff -r`, Claude's Grep) is judged by every
 file it can reach: `grep -r KEY .` is refused in a workspace with a `.env` — search a
 narrower path. A tool that honours `.gitignore` (`rg`, Claude's Grep) is not charged
-with files git ignores, because it never opens them. Only content is protected this
-way: `ls`, `find` and Glob still list a denied file's name, and `git log -p` or
-`git show` print whatever was committed.
+with files git ignores, because it never opens them. A search that says what it opens
+is judged by that: `rg -g '*.ts'`, `rg -t ts`, `grep -r --include='*.ts'` and Claude's
+Grep with `glob` or `type` are not charged with a `.env` they would never open. Portrail
+reads the filters the way the tool does — the last matching glob wins, a glob without a
+slash matches a name at any depth, one with a slash is relative to the working
+directory — and when it cannot be sure (character classes, a file type it does not know,
+`--type-add`) it judges the whole directory as before. Naming the secret file itself, as
+in `--exclude=.env`, is still a read of it. Only content is protected this way: `ls`,
+`find` and Glob still list a denied file's name, and `git log -p` or `git show` print
+whatever was committed.
 
 | command                       | verdict | why                                                    |
 | ----------------------------- | ------- | ------------------------------------------------------ |
