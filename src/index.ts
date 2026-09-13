@@ -20,6 +20,8 @@ export {
   canonical,
   equal,
   type PortrailEvent,
+  type RecordFilter,
+  type SelectOptions,
 } from "./store/index.ts";
 export {
   Keys,
