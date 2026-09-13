@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { Gateway } from "../src/core/gateway.ts";
 import { FakeProvider } from "../src/providers/fake/index.ts";
 import { BuiltinDecider } from "../src/decide/builtin.ts";
@@ -44,34 +45,37 @@ test("denied operations do not run, and the decision is recorded with its rule",
   const run = gateway.createRun({
     workspace: "work",
     agent: "fake",
-    prompt: script([{ exec: "rm -rf /" }, { exec: "npm test" }, { write: ".env" }]),
+    prompt: script([{ exec: "rm -rf build" }, { exec: "npm test" }, { write: ".env" }, { exec: "rm -rf /" }]),
   });
   await untilDone(gateway, run.id);
 
   const decided = events.filter((e) => e.runId === run.id && e.type === "operation.decided");
   assert.deepEqual(
     decided.map((e) => e.data.verdict),
-    ["deny", "allow", "deny"],
+    ["deny", "allow", "deny", "deny"],
   );
   assert.equal(decided[0]?.data.rule, "exec:rm -rf*");
   assert.equal(decided[2]?.data.rule, "write:.env*");
+  assert.equal(decided[3]?.data.decidedBy, "portrail:containment", "a path outside the workspace never reaches a rule");
   const commands = events.filter((e) => e.runId === run.id && e.type === "command.started");
   assert.equal(commands.length, 1, "only the allowed command started");
   const summary = gateway.run(run.id).summary ?? "";
-  assert.equal((summary.match(/refused:/g) ?? []).length, 2, "the agent reported both refusals");
+  assert.equal((summary.match(/refused:/g) ?? []).length, 3, "the agent reported every refusal");
   await gateway.shutdown();
 });
 
 test("a path outside the workspace is refused before any rule is consulted", async () => {
   const calls: string[] = [];
+  let seenRoot = "";
   const spy: Decider = {
     name: "spy",
-    decide: async (op) => {
+    decide: async (op, context) => {
       calls.push(op.kind);
+      seenRoot = context.workspaceRoot;
       return { verdict: "allow", reason: "spy allows all" };
     },
   };
-  const { gateway, events } = testGateway({ decider: spy });
+  const { gateway, events, root } = testGateway({ decider: spy });
   const run = gateway.createRun({
     workspace: "work",
     agent: "fake",
@@ -84,6 +88,7 @@ test("a path outside the workspace is refused before any rule is consulted", asy
   assert.equal(decided[1]?.data.decidedBy, "portrail:containment");
   assert.equal(decided[2]?.data.decidedBy, "spy");
   assert.deepEqual(calls, ["write"], "the decider only ever saw the in-workspace operation");
+  assert.equal(seenRoot, realpathSync.native(root), "the decider sees the workspace root as the filesystem spells it");
   await gateway.shutdown();
 });
 

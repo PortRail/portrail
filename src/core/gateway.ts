@@ -14,7 +14,8 @@ import {
   type RunState,
   type Workspace,
 } from "../types.ts";
-import { commandWords } from "../decide/builtin.ts";
+import { parseCommand, type CommandSegment } from "../decide/builtin.ts";
+import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
 import { DeltaBatcher } from "./delta-batcher.ts";
 import { ParkingLot } from "./parking.ts";
 import type { OperationRecord, RunRecord, SessionRecord } from "./records.ts";
@@ -135,7 +136,7 @@ export class Gateway extends EventEmitter {
     );
     let canonical: string;
     try {
-      canonical = realpathSync(input.root);
+      canonical = realpathSync.native(input.root);
       ensure(statSync(canonical).isDirectory(), 400, "INVALID_REQUEST", "Choose a directory.");
     } catch (error) {
       if (error instanceof PortrailError) throw error;
@@ -627,7 +628,9 @@ export class Gateway extends EventEmitter {
     const context: DecisionContext = {
       keyId: run.keyId,
       keyPolicy: key?.policy ?? null,
-      workspaceRoot: workspace.root,
+      // The root as the filesystem spells it, so relative paths the decider builds
+      // from canonical operation paths always line up.
+      workspaceRoot: contained.root,
       // Everything decided in this run, plus anything allowed "for this session"
       // by an earlier run of the same session. The decider chooses what carries.
       priorDecisions: this.store
@@ -826,25 +829,21 @@ export function canonicalPath(root: string, declared: string): string {
       // Does not exist: canonicalise the parent, keep the leaf.
       return join(canonicalPath(root, dirname(full)), basename(full));
     }
-    if (!info.isSymbolicLink()) return realpathSync(full);
+    if (!info.isSymbolicLink()) return realpathSync.native(full);
     const target = readlinkSync(full);
     full = isAbsolute(target) ? target : resolve(dirname(full), target);
   }
   throw new Error("Too many symlink hops.");
 }
 
-/** Places no agent may ever touch, whatever workspace it is in. */
+/** Places no agent may ever touch, whatever workspace it is in, as absolute paths. */
 export function protectedPaths(dataDir?: string): string[] {
   const home = homedir();
-  const paths = [
-    ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".codex", ".claude", ".config/claude", ".config/claude-code",
-    ".netrc", ".npmrc", ".pypirc", ".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile",
-    ".portrail",
-  ].map((entry) => join(home, entry));
+  const paths = PROTECTED_HOME_ENTRIES.map((entry) => join(home, entry.path));
   if (dataDir) paths.push(dataDir);
   return paths.map((path) => {
     try {
-      return realpathSync(path);
+      return realpathSync.native(path);
     } catch {
       return path;
     }
@@ -853,43 +852,101 @@ export function protectedPaths(dataDir?: string): string[] {
 
 function safeRealpath(path: string): string {
   try {
-    return realpathSync(path);
+    return realpathSync.native(path);
   } catch {
     return resolve(path);
   }
 }
 
+/** Device files a command may name without the workspace being a question. */
+const DEVICES = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/zero", "/dev/random", "/dev/urandom"]);
+
 /**
- * Every argument is resolved the way the shell would — `~/x` from home, anything
- * else against the working directory — and held against the protected list. Globs,
- * variables and other expansions were refused before this runs, so what arrives here
- * is literal; a word that is not a path simply resolves to nothing protected.
+ * The pieces of one word that could name something on disk: the word itself, what
+ * follows `=` or `:` (`--output=/tmp/x`, `HEAD:.env`), what follows a `<` redirect,
+ * and a path glued to a short option (`-o/tmp/x`).
  */
-export function protectedPathInCommand(words: readonly (readonly string[])[], cwd: string, protectedList: readonly string[]): string | null {
-  const home = homedir();
-  for (const segment of words) {
-    for (const word of segment) {
-      // `--flag=~/x` carries the path after the equals sign; `<file` reads it.
-      for (const raw of word.split("=")) {
-        const part = raw.replace(/^[0-9]*</, "");
-        if (!part) continue;
-        const candidate = part === "~" || part.startsWith("~/") ? join(home, part.slice(1)) : resolve(cwd, part);
+function pathCandidates(word: string): string[] {
+  const parts = new Set<string>([word, ...word.split(/[=:]/)]);
+  return [...parts]
+    .map((part) => part.replace(/^[0-9]*</, ""))
+    .flatMap((part) => {
+      const attached = /^-[A-Za-z]+(\/.*)$/.exec(part);
+      return attached ? [part, attached[1]!] : [part];
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Where a word points if it is a path, resolved the way the shell would: `~` from
+ * home, `/…` as given, anything else against the working directory. An absolute word
+ * whose first component does not exist is text (`/api/v1`, `/foo/,/bar/p`), not a path.
+ */
+function looksLikePath(part: string, cwd: string): string | null {
+  if (part === "~" || part.startsWith("~/")) return join(homedir(), part.slice(1));
+  if (part.startsWith("/")) {
+    const full = resolve(part);
+    if (full === "/") return full;
+    const top = full.split("/")[1];
+    return top && existsSync(`/${top}`) ? full : null;
+  }
+  return resolve(cwd, part);
+}
+
+/**
+ * Every path a command names must lie inside the workspace and off the protected
+ * list — the same rule a declared read or write follows. The program itself
+ * (`/usr/bin/env`) may live anywhere but is still held to the protected list; device
+ * files are always fine. Returns the canonical paths of what exists on disk, so the
+ * decider can judge the command as a read of those files.
+ */
+export function judgeCommandPaths(
+  segments: readonly CommandSegment[],
+  cwd: string,
+  root: string,
+  protectedList: readonly string[],
+): { refused: string | null; paths: string[] } {
+  const paths = new Set<string>();
+  for (const segment of segments) {
+    for (const [index, word] of segment.words.entries()) {
+      for (const part of pathCandidates(word)) {
+        const candidate = looksLikePath(part, cwd);
+        if (!candidate) continue;
         let canonical: string;
         try {
           canonical = canonicalPath(cwd, candidate);
         } catch {
-          return part;
+          return { refused: `Refused: the command names ${part}, which could not be resolved.`, paths: [] };
         }
-        if (protectedList.some((p) => isWithin(canonical, p))) return part;
+        if (protectedList.some((p) => isWithinFold(canonical, p) || isWithinFold(p, canonical)))
+          return { refused: `Refused: the command touches ${part}, which is protected everywhere.`, paths: [] };
+        if (DEVICES.has(canonical) || index === segment.programIndex) continue;
+        if (!isWithin(canonical, root))
+          return { refused: `Refused: the command names ${part}, which resolves outside the workspace (${canonical}).`, paths: [] };
+        try {
+          lstatSync(canonical);
+          paths.add(canonical);
+        } catch {
+          // Names nothing on disk: a flag, a search term, a file that does not exist yet.
+        }
       }
     }
   }
-  return null;
+  return { refused: null, paths: [...paths] };
 }
 
 function isWithin(candidate: string, parent: string): boolean {
   const rel = relative(parent, candidate);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * The protected list is compared without regard to case on every platform. Existing
+ * paths already carry their on-disk spelling; this catches a leaf that does not exist
+ * yet, and a false hit here only ever refuses.
+ */
+function isWithinFold(candidate: string, parent: string): boolean {
+  return isWithin(candidate.toLowerCase(), parent.toLowerCase());
 }
 
 /**
@@ -902,7 +959,7 @@ export function containOperation(
   operation: Operation,
   declaredRoot: string,
   dataDir?: string,
-): { operation: Operation; refused: string | null } {
+): { operation: Operation; refused: string | null; root: string } {
   const root = safeRealpath(declaredRoot);
   const protectedList = protectedPaths(dataDir);
   const check = (declared: string): { canonical: string; refused: string | null } => {
@@ -914,59 +971,67 @@ export function containOperation(
       return { canonical: declared, refused: `Refused: ${declared} could not be resolved.` };
     }
     if (!isWithin(canonical, root)) return { canonical, refused: `Refused: ${declared} resolves outside the workspace (${canonical}).` };
-    const hit = protectedList.find((p) => isWithin(canonical, p));
+    const hit = protectedList.find((p) => isWithinFold(canonical, p));
     if (hit) return { canonical, refused: `Refused: ${declared} is inside a protected directory (${hit}).` };
     return { canonical, refused: null };
   };
 
   if (operation.kind === "write") {
-    if (!operation.changes.length) return { operation, refused: "Refused: a write with no files declared." };
+    if (!operation.changes.length) return { operation, refused: "Refused: a write with no files declared." , root };
     const changes = [];
     for (const change of operation.changes) {
       const result = check(change.path);
-      if (result.refused) return { operation, refused: result.refused };
+      if (result.refused) return { operation, refused: result.refused , root };
       changes.push({ ...change, path: result.canonical });
     }
-    return { operation: { ...operation, changes }, refused: null };
+    return { operation: { ...operation, changes }, refused: null, root };
   }
   if (operation.kind === "read") {
     const paths = [];
     for (const path of operation.paths) {
       const result = check(path);
-      if (result.refused) return { operation, refused: result.refused };
+      if (result.refused) return { operation, refused: result.refused , root };
       paths.push(result.canonical);
     }
-    return { operation: { ...operation, paths }, refused: null };
+    return { operation: { ...operation, paths }, refused: null, root };
   }
   if (operation.kind === "exec") {
-    if (!operation.command.trim()) return { operation, refused: "Refused: an empty command." };
+    if (!operation.command.trim()) return { operation, refused: "Refused: an empty command." , root };
     // The directory a command runs in decides what its relative paths mean.
     const cwd = check(operation.cwd || ".");
-    if (cwd.refused) return { operation, refused: cwd.refused.replace(/^Refused: /, "Refused: the working directory ") };
+    if (cwd.refused) return { operation, refused: cwd.refused.replace(/^Refused: /, "Refused: the working directory ") , root };
     // Rules match a command as text, so what text cannot express is refused here,
-    // before any decider — and every argument is resolved against the working
-    // directory and held to the protected list, the one place that knows what the
-    // text points at.
-    const { words, unjudgeable } = commandWords(operation.command);
-    if (unjudgeable) return { operation, refused: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.` };
-    const touched = protectedPathInCommand(words, cwd.canonical, protectedList);
-    if (touched) return { operation, refused: `Refused: the command touches ${touched}, which is protected everywhere.` };
-    return { operation: { ...operation, cwd: cwd.canonical }, refused: null };
+    // before any decider — and every path the command names is resolved against the
+    // working directory and held to the workspace and the protected list, the one
+    // place that knows what the text points at.
+    const { segments, unjudgeable } = parseCommand(operation.command);
+    if (unjudgeable) return { operation, refused: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`, root };
+    const named = judgeCommandPaths(segments, cwd.canonical, root, protectedList);
+    if (named.refused) return { operation, refused: named.refused, root };
+    return { operation: { ...operation, cwd: cwd.canonical, paths: named.paths }, refused: null, root };
   }
   if (operation.kind === "net" && !operation.host && !operation.url)
-    return { operation, refused: "Refused: a network operation with no destination." };
-  return { operation, refused: null };
+    return { operation, refused: "Refused: a network operation with no destination." , root };
+  return { operation, refused: null, root };
 }
+
+/** Where the operating system keeps itself; nothing there is anyone's project. */
+const SYSTEM_ROOTS = [
+  "/usr", "/etc", "/bin", "/sbin", "/opt", "/lib", "/lib64", "/boot", "/proc", "/sys", "/dev", "/root", "/cores",
+  "/System", "/Library", "/Applications", "/private/etc",
+];
 
 /** Why a directory may not become a workspace, or null. */
 export function refuseWorkspaceRoot(declared: string, dataDir?: string): string | null {
   const canonical = safeRealpath(declared);
   const home = safeRealpath(homedir());
   if (canonical === "/" || canonical === dirname(canonical)) return "The filesystem root cannot be a workspace.";
+  if (SYSTEM_ROOTS.some((system) => isWithin(canonical, safeRealpath(system))))
+    return "A system directory cannot be a workspace. Choose a project folder.";
   if (canonical === home) return "Your home directory cannot be a workspace. Enrol a project folder inside it.";
   if (isWithin(home, canonical)) return "A directory above your home directory cannot be a workspace.";
   for (const p of protectedPaths(dataDir))
-    if (isWithin(p, canonical) || isWithin(canonical, p))
+    if (isWithinFold(p, canonical) || isWithinFold(canonical, p))
       return `${canonical} contains or lies inside a protected directory (${p}). Choose a project folder.`;
   if (existsSync(join(canonical, ".portrail"))) return `${canonical} contains a .portrail directory. Choose a project folder.`;
   return null;

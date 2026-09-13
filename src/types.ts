@@ -37,6 +37,12 @@ export interface ExecOperation extends OperationBase {
   argv?: string[];
   cwd: string;
   actions?: CommandAction[];
+  /**
+   * Canonical paths of the files and directories the command names, filled in by
+   * containment. A rule can judge them as reads; a word that names nothing on disk
+   * is not here.
+   */
+  paths?: string[];
 }
 
 export interface WriteOperation extends OperationBase {

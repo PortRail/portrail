@@ -1,8 +1,22 @@
-import { relative, resolve, sep } from "node:path";
+import { basename, relative, resolve, sep } from "node:path";
 import type { Decider, DecisionContext } from "../extension.ts";
 import type { Decision, Operation } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
+
+/** One segment of a command line, in the forms a rule may be matched against. */
+export interface CommandSegment {
+  /** The unquoted words, as the shell would pass them. */
+  words: string[];
+  /** Index in `words` of the program that actually runs, once wrappers are stripped. */
+  programIndex: number;
+  /** The words joined — what allow and deny rules see first. */
+  text: string;
+  /** `text` with wrappers and shell keywords removed: `env curl x` → `curl x`. */
+  unwrapped: string;
+  /** `unwrapped` with the program reduced to its name: `/usr/bin/curl x` → `curl x`. */
+  named: string;
+}
 
 /**
  * A command line is judged one segment at a time.
@@ -14,19 +28,42 @@ import { shellSplit } from "../providers/codex/shell.ts";
  * variable expansion, an environment assignment, a glob the shell would expand.
  * Those cannot be judged by matching text, so they are not allowed. What is left is
  * unquoted before matching, so `cat ~/".ssh"/id_"rsa"` is judged as what it opens.
+ *
+ * This is the one parser. Containment and the decider both read from it, so what
+ * one refuses the other cannot let through.
  */
-export function commandSegments(command: string): { segments: string[]; unjudgeable: string | null } {
+export function parseCommand(command: string): { segments: CommandSegment[]; unjudgeable: string | null } {
   const trimmed = command.trim();
   const scanned = scan(trimmed);
-  if (scanned.unjudgeable) return { segments: [trimmed], unjudgeable: scanned.unjudgeable };
-  const segments: string[] = [];
+  if (scanned.unjudgeable) return { segments: [], unjudgeable: scanned.unjudgeable };
+  const segments: CommandSegment[] = [];
   for (const raw of scanned.segments) {
     const assignment = leadingAssignment(raw);
-    if (assignment.refused) return { segments: [trimmed], unjudgeable: `an environment assignment (${assignment.refused})` };
+    if (assignment.refused) return { segments: [], unjudgeable: `an environment assignment (${assignment.refused})` };
     const words = shellSplit(assignment.rest);
-    if (words.length) segments.push(words.join(" "));
+    if (!words.length) continue;
+    const inner = unwrap(words);
+    if (inner.refused) return { segments: [], unjudgeable: inner.refused };
+    const programIndex = words.length - inner.words.length;
+    const namedWords = inner.words.length ? [basename(inner.words[0]!), ...inner.words.slice(1)] : [];
+    // `/usr/bin/env curl` → `env curl` → `curl`: naming the program can expose a wrapper.
+    const renamed = unwrap(namedWords);
+    segments.push({
+      words,
+      programIndex,
+      text: words.join(" "),
+      unwrapped: inner.words.join(" "),
+      named: (renamed.refused ? namedWords : renamed.words).join(" "),
+    });
   }
-  return { segments: segments.length ? segments : [trimmed], unjudgeable: null };
+  if (!segments.length) segments.push({ words: [trimmed], programIndex: 0, text: trimmed, unwrapped: trimmed, named: trimmed });
+  return { segments, unjudgeable: null };
+}
+
+/** The segments of a command line as text, or the reason the line cannot be judged. */
+export function commandSegments(command: string): { segments: string[]; unjudgeable: string | null } {
+  const parsed = parseCommand(command);
+  return { segments: parsed.unjudgeable ? [command.trim()] : parsed.segments.map((segment) => segment.text), unjudgeable: parsed.unjudgeable };
 }
 
 /**
@@ -34,8 +71,85 @@ export function commandSegments(command: string): { segments: string[]; unjudgea
  * arguments — and the reason the line cannot be judged at all, if there is one.
  */
 export function commandWords(command: string): { words: string[][]; unjudgeable: string | null } {
-  const scanned = scan(command.trim());
-  return { words: scanned.segments.map((segment) => shellSplit(leadingAssignment(segment).rest)), unjudgeable: scanned.unjudgeable };
+  const parsed = parseCommand(command);
+  return { words: parsed.segments.map((segment) => segment.words), unjudgeable: parsed.unjudgeable };
+}
+
+/** Shell keywords that may precede a command inside a compound. */
+const KEYWORDS = new Set(["if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"]);
+/** Wrappers that run their argument unchanged and take no options we can judge. */
+const PLAIN_WRAPPERS = new Set(["exec", "builtin", "nohup", "time", "setsid", "unbuffer"]);
+const XARGS_WITH_VALUE = new Set([
+  "-n", "-I", "-P", "-L", "-s", "-d", "-E", "-a", "-J", "-R", "-S",
+  "--max-args", "--replace", "--max-procs", "--max-lines", "--delimiter", "--arg-file", "--max-chars", "--eof",
+]);
+
+/**
+ * Strip the wrappers a shell puts in front of the command that actually runs, so a
+ * deny rule for `curl` also sees `env curl`, `nohup curl`, `xargs curl`. Options that
+ * would change what runs (`env -S`, `nohup -p`) are refused: a rule cannot judge them.
+ */
+function unwrap(input: readonly string[]): { words: string[]; refused: string | null } {
+  let words = [...input];
+  for (let guard = 0; guard < 8 && words.length; guard++) {
+    const head = words[0]!;
+    if (KEYWORDS.has(head)) {
+      words.shift();
+      continue;
+    }
+    if (head === "env") {
+      words.shift();
+      if (words[0]?.startsWith("-")) return { words, refused: "options to env" };
+      while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) {
+        const name = words[0]!.slice(0, words[0]!.indexOf("="));
+        if (!HARMLESS_ASSIGNMENT.test(name)) return { words, refused: `an environment assignment (${name})` };
+        words.shift();
+      }
+      continue;
+    }
+    if (head === "command") {
+      // `command -v x` asks where x lives; it runs nothing.
+      if (words[1] === "-v" || words[1] === "-V") break;
+      words.shift();
+      if (words[0] === "-p") words.shift();
+      continue;
+    }
+    if (PLAIN_WRAPPERS.has(head)) {
+      words.shift();
+      if (words[0]?.startsWith("-")) return { words, refused: `options to ${head}` };
+      continue;
+    }
+    if (head === "nice") {
+      words.shift();
+      if (words[0] === "-n") words.splice(0, 2);
+      else if (/^-\d+$|^--adjustment=/.test(words[0] ?? "")) words.shift();
+      continue;
+    }
+    if (head === "timeout") {
+      words.shift();
+      while (words[0]?.startsWith("-")) {
+        if (words[0] === "-k" || words[0] === "-s") words.splice(0, 2);
+        else words.shift();
+      }
+      words.shift(); // the duration
+      continue;
+    }
+    if (head === "stdbuf") {
+      words.shift();
+      while (words[0]?.startsWith("-")) words.shift();
+      continue;
+    }
+    if (head === "xargs") {
+      words.shift();
+      while (words[0]?.startsWith("-")) {
+        const flag = words.shift()!;
+        if (XARGS_WITH_VALUE.has(flag)) words.shift();
+      }
+      continue;
+    }
+    break;
+  }
+  return { words, refused: null };
 }
 
 /**
@@ -95,6 +209,11 @@ function scan(line: string): { segments: string[]; unjudgeable: string | null } 
       continue;
     }
     if (char === "`" || (char === "$" && next === "(") || (char === "<" && next === "(")) return { segments, unjudgeable: "command substitution" };
+    if (char === "(" || char === ")") {
+      // A subshell runs what is inside it; judge that as its own segment.
+      push();
+      continue;
+    }
     if (char === "$" && expands(next, "")) return { segments, unjudgeable: "variable expansion" };
     if (char === "~" && wordStart && next !== "" && next !== "/" && !/\s/.test(next)) return { segments, unjudgeable: "tilde expansion" };
     if (char === "{") {
@@ -153,19 +272,20 @@ function leadingAssignment(segment: string): { rest: string; refused: string | n
 }
 
 /** The values a rule is matched against, per operation kind. */
-function subjects(operation: Operation, workspaceRoot: string): string[] {
-  const relativise = (path: string) => {
-    const full = resolve(workspaceRoot, path);
-    const inside = relative(workspaceRoot, full);
-    // Paths outside the workspace are rejected before we get here, but be explicit.
-    return inside === "" ? "." : inside.split(sep).join("/");
-  };
+/** A path as the rules see it: relative to the workspace, forward slashes. */
+function relativise(workspaceRoot: string, path: string): string {
+  const full = resolve(workspaceRoot, path);
+  const inside = relative(workspaceRoot, full);
+  // Paths outside the workspace are rejected before we get here, but be explicit.
+  return inside === "" ? "." : inside.split(sep).join("/");
+}
 
+function subjects(operation: Operation, workspaceRoot: string): string[] {
   switch (operation.kind) {
     case "read":
-      return operation.paths.map(relativise);
+      return operation.paths.map((path) => relativise(workspaceRoot, path));
     case "write":
-      return operation.changes.map((change) => relativise(change.path));
+      return operation.changes.map((change) => relativise(workspaceRoot, change.path));
     case "exec":
       return commandSegments(operation.command).segments;
     case "net":
@@ -236,6 +356,18 @@ export class BuiltinDecider implements Decider {
           verdict: "deny",
           reason: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
         };
+      // A command that names a file is a read of that file, whatever the file is called
+      // on the command line: containment resolved the names to what is on disk.
+      if (operation.paths?.length) {
+        const named = operation.paths.map((path) => relativise(context.workspaceRoot, path));
+        const denied = firstMatch(this.deny, "read", named);
+        if (denied)
+          return {
+            verdict: "deny",
+            reason: `Refused by the deny list (${denied.source}): the command reads ${named.find((path) => denied.test(path))}.`,
+            rule: denied.source,
+          };
+      }
     }
 
     // Deny first, and a single denied path — or command segment — refuses the whole operation.
