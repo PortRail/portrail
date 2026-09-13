@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { canonical, digest, equal, Store } from "../src/store/index.ts";
+import { Keys } from "../src/core/keys.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -270,5 +271,18 @@ test("tailEvents walks the whole event log from a row cursor, across sessions", 
   );
   assert.equal(store.tailEvents(tail.at(-1)!.row, 10).length, 0);
   assert.equal(store.removeEvents("s1"), 2);
+  store.close();
+});
+
+test("a key is found by its hash among hundreds, and an unknown token is refused", () => {
+  const store = new Store(":memory:");
+  const keys = new Keys(store);
+  const tokens = Array.from(
+    { length: 500 },
+    (_, i) => keys.create({ name: `k${i}` }).token,
+  );
+  const principal = keys.authenticate(tokens[250]);
+  assert.equal(principal.name, "k250");
+  assert.throws(() => keys.authenticate("prt_" + "x".repeat(43)), /Unknown API key/);
   store.close();
 });

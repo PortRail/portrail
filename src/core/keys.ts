@@ -1,5 +1,5 @@
 import { ensure } from "../contracts/errors.ts";
-import { digest, id as newId, now, secret, type Store } from "../store/index.ts";
+import { digest, id as newId, now, secret, type Store, equal } from "../store/index.ts";
 
 export const SCOPES = [
   "runs:write",
@@ -111,10 +111,9 @@ export class Keys {
       "A valid API key is required. Send it as `Authorization: Bearer prt_...`.",
     );
     const hash = digest(token);
-    const key = this.store
-      .list<KeyRecord>("key")
-      .find((candidate) => candidate.hash === hash);
-    ensure(key, 401, "UNAUTHORIZED", "Unknown API key.");
+    // Looked up by its indexed hash; the constant-time compare is belt and braces.
+    const key = this.store.findOne<KeyRecord>("key", { hash });
+    ensure(key && equal(key.hash, hash), 401, "UNAUTHORIZED", "Unknown API key.");
     ensure(!key.revokedAt, 401, "KEY_REVOKED", "This API key was revoked.");
     ensure(
       !key.expiresAt || Date.parse(key.expiresAt) > Date.now(),
