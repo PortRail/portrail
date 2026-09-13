@@ -57,6 +57,9 @@ Every change below was first reproduced by a failing test in the suite.
 - Request bodies are type-checked instead of coerced: a non-string `prompt` is a 400, not
   a run; a non-string `session` is a 400, not a 500; `metadata` is limited to 16 KiB.
 - Unexpected server errors are logged with the request id the client receives.
+- `GET /health` answers with `status` and `version` only unless the caller holds a key or
+  the local token; agent readiness and the Pro status are no longer public behind a
+  tunnel. `portrail status` sends the local token.
 - `GET /v1/runs/:id/operations` returns 404 for an unknown run; an empty id no longer
   lists every operation. An idempotent retry of run creation returns the run as it
   stands now. The bearer scheme is accepted in any letter case. Local answers require a
@@ -84,7 +87,8 @@ Every change below was first reproduced by a failing test in the suite.
 - `.docker` is protected as a whole directory in the Claude Code sandbox (was `config.json` only).
 - The `ajv` and `ajv-formats` dependencies, never used, are removed. The package declares
   macOS and Linux as supported platforms.
-- Prettier is applied to the whole repository and checked in CI, alongside `npm audit`.
+- Prettier is applied to the whole repository and checked in CI, alongside `npm audit`;
+  the GitHub Actions in CI are pinned to commit SHAs.
 
 ## [0.1.0] — 2026-09-11
 

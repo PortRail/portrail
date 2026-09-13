@@ -426,8 +426,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "A bearer token was sent and is not valid."
           }
-        }
+        },
+        "description": "Without a credential only status and version are returned. With a key of any scope, or the local token, agents and pro are included; a wrong key is a 401."
       }
     },
     "/v1/runs": {

@@ -145,7 +145,8 @@ Scopes: `runs:write` `runs:read` `approvals:decide` `workspaces:admin` `policy:a
 
 ## Health
 
-`GET /health` — no auth. `{"status":"ok","version":"…","agents":[…],"pro":null}`.
+`GET /health` — `{"status":"ok","version":"…"}` without a credential, for monitors. Send a
+key (any scope) or `X-Portrail-Local` to also get `agents` and `pro`; a wrong key is a 401.
 
 ## Portrail Pro adds
 
