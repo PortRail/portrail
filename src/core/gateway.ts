@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
-import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, relative, resolve, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ensure, fail, PortrailError } from "../contracts/errors.ts";
 import type { Decider, DecisionContext } from "../extension.ts";
 import type { Provider, ProviderEvent, ProviderHandle } from "../providers/types.ts";
@@ -16,6 +16,8 @@ import {
 } from "../types.ts";
 import { parseCommand, type CommandSegment } from "../decide/builtin.ts";
 import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
+import { canonicalPath, isWithin, isWithinFold } from "./paths.ts";
+export { canonicalPath } from "./paths.ts";
 import { DeltaBatcher } from "./delta-batcher.ts";
 import { ParkingLot } from "./parking.ts";
 import type { OperationRecord, RunRecord, SessionRecord } from "./records.ts";
@@ -813,29 +815,6 @@ export class Gateway extends EventEmitter {
   }
 }
 
-/**
- * Canonicalise a path the agent declared. Existing components are resolved with
- * realpath; a symlink at the leaf — even a dangling one — is followed; whatever does
- * not exist yet is appended to the deepest real ancestor. The result is what the
- * filesystem would actually touch.
- */
-export function canonicalPath(root: string, declared: string): string {
-  let full = resolve(root, declared);
-  for (let hops = 0; hops < 16; hops++) {
-    let info;
-    try {
-      info = lstatSync(full);
-    } catch {
-      // Does not exist: canonicalise the parent, keep the leaf.
-      return join(canonicalPath(root, dirname(full)), basename(full));
-    }
-    if (!info.isSymbolicLink()) return realpathSync.native(full);
-    const target = readlinkSync(full);
-    full = isAbsolute(target) ? target : resolve(dirname(full), target);
-  }
-  throw new Error("Too many symlink hops.");
-}
-
 /** Places no agent may ever touch, whatever workspace it is in, as absolute paths. */
 export function protectedPaths(dataDir?: string): string[] {
   const home = homedir();
@@ -933,20 +912,6 @@ export function judgeCommandPaths(
     }
   }
   return { refused: null, paths: [...paths] };
-}
-
-function isWithin(candidate: string, parent: string): boolean {
-  const rel = relative(parent, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-/**
- * The protected list is compared without regard to case on every platform. Existing
- * paths already carry their on-disk spelling; this catches a leaf that does not exist
- * yet, and a false hit here only ever refuses.
- */
-function isWithinFold(candidate: string, parent: string): boolean {
-  return isWithin(candidate.toLowerCase(), parent.toLowerCase());
 }
 
 /**
