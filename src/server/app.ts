@@ -360,32 +360,39 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     reply.raw.write(`: portrail ${version}\n\n`);
 
     const onlyThisRun = query.all !== "true";
+    let buffered: PortrailEvent[] = [];
+    const nextEvent = () => {
+      if (!buffered.length) buffered = store.events(session.id, seq, 100);
+      return buffered.shift();
+    };
+    const finished = () => TERMINAL_STATES.has(store.get<RunRecord>("run", run.id)?.state ?? "outcome_unknown");
+    // Writes at most one event per call and says so. Events that are not this run's
+    // are consumed silently and never count against the session's allowance, so a
+    // long earlier run cannot starve a later one. The stream ends itself once this
+    // run's run.completed is on the wire — no timers guessing when that was.
     const delivery = pacer.subscribe(session.id, () => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return false;
-      const next = store.events(session.id, seq, 1)[0];
-      if (!next) return false;
-      seq = next.seq;
-      // A run's stream is about that run. Session-level events (no runId) and other
-      // runs in the same session are skipped unless the caller asks for everything.
-      if (onlyThisRun && next.runId !== run.id) return true;
-      reply.raw.write(`id: ${next.seq}\nevent: ${next.type}\ndata: ${JSON.stringify(next)}\n\n`);
-      if (reply.raw.writableLength > 1024 * 1024) reply.raw.end();
-      return true;
+      for (;;) {
+        const next = nextEvent();
+        if (!next) {
+          // Replay exhausted with the run already over and its run.completed behind the
+          // cursor: nothing more will ever come.
+          if (onlyThisRun && finished()) reply.raw.end();
+          return false;
+        }
+        seq = next.seq;
+        if (onlyThisRun && next.runId !== run.id) continue;
+        reply.raw.write(`id: ${next.seq}\nevent: ${next.type}\ndata: ${JSON.stringify(next)}\n\n`);
+        if ((onlyThisRun && next.type === "run.completed") || reply.raw.writableLength > 1024 * 1024) reply.raw.end();
+        return true;
+      }
     });
 
     const onEvent = (event: PortrailEvent) => {
       if (event.sessionId === session.id) delivery.wake();
-      // Close the stream once this run is over and everything has been delivered.
-      if (event.runId === run.id && event.type === "run.completed" && onlyThisRun)
-        setTimeout(() => {
-          delivery.wake();
-          setTimeout(() => reply.raw.end(), 50).unref();
-        }, 50).unref();
     };
     gateway.on("event", onEvent);
     delivery.wake();
-    if (onlyThisRun && TERMINAL_STATES.has(run.state))
-      setTimeout(() => reply.raw.end(), 100).unref();
 
     const heartbeat = setInterval(() => {
       try {

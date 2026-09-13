@@ -195,3 +195,28 @@ test("without a local token the answer routes do not exist", async () => {
   assert.equal((await s.app.inject({ method: "GET", url: "/v1/operations/pending", headers: { "x-portrail-local": "x" } })).statusCode, 404);
   await s.close();
 });
+
+test("a replayed stream delivers every event of the run before closing, and the next run in the session still streams", async () => {
+  const s = await serverWithKey();
+  const steps = Array.from({ length: 30 }, (_, i) => ({ exec: `ls ${i}` }));
+  const a = (await s.app.inject({ method: "POST", url: "/v1/runs", headers: s.headers, payload: { agent: "fake", workspace: "work", prompt: script(steps), wait: 5 } })).json();
+  assert.equal(a.state, "succeeded");
+  const seqs = (runId: string) => s.store.events(a.sessionId).filter((event) => event.runId === runId).map((event) => event.seq);
+  const expected = seqs(a.id);
+  assert.ok(expected.length > 120, `need more than one window of events, got ${expected.length}`);
+
+  const ids = (body: string) => [...body.matchAll(/^id: (\d+)$/gm)].map((match) => Number(match[1]));
+  const replay = await s.app.inject({ method: "GET", url: `/v1/runs/${a.id}/events`, headers: s.headers });
+  assert.deepEqual(ids(replay.body), expected, "every event of the run, in order");
+  assert.equal([...replay.body.matchAll(/^event: (.+)$/gm)].at(-1)?.[1], "run.completed");
+
+  const middle = expected[Math.floor(expected.length / 2)]!;
+  const resumed = await s.app.inject({ method: "GET", url: `/v1/runs/${a.id}/events?after=${middle}`, headers: s.headers });
+  assert.deepEqual(ids(resumed.body), expected.filter((seq) => seq > middle));
+
+  const b = (await s.app.inject({ method: "POST", url: "/v1/runs", headers: s.headers, payload: { session: a.sessionId, prompt: script([{ text: "second" }]), wait: 5 } })).json();
+  assert.equal(b.state, "succeeded");
+  const streamB = await s.app.inject({ method: "GET", url: `/v1/runs/${b.id}/events`, headers: s.headers });
+  assert.deepEqual(ids(streamB.body), seqs(b.id), "the second run's events are not eaten by the first run's allowance");
+  await s.close();
+});
