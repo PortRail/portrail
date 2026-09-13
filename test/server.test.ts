@@ -220,3 +220,20 @@ test("a replayed stream delivers every event of the run before closing, and the 
   assert.deepEqual(ids(streamB.body), seqs(b.id), "the second run's events are not eaten by the first run's allowance");
   await s.close();
 });
+
+test("run bodies are validated, not coerced", async () => {
+  const s = await serverWithKey();
+  const post = (payload: unknown) => s.app.inject({ method: "POST", url: "/v1/runs", headers: s.headers, payload: payload as Record<string, unknown> });
+  const base = { agent: "fake", workspace: "work", prompt: "x" };
+  const prompt = await post({ ...base, prompt: {} });
+  assert.equal(prompt.statusCode, 400);
+  assert.match(prompt.json().error.message, /prompt must be a string/);
+  assert.equal((await post({ ...base, session: {} })).statusCode, 400, "an object where a session id belongs is a bad request, not a crash");
+  assert.equal((await post({ ...base, model: { a: 1 } })).statusCode, 400);
+  assert.equal((await post({ ...base, maxSeconds: "60" })).statusCode, 400);
+  assert.equal((await post({ ...base, metadata: "nope" })).statusCode, 400);
+  assert.equal((await post({ ...base, metadata: { blob: "x".repeat(17 * 1024) } })).json().error.code, "PAYLOAD_TOO_LARGE");
+  assert.equal((await post([])).statusCode, 400);
+  assert.equal(s.gateway.listRuns().length, 0, "nothing malformed became a run");
+  await s.close();
+});

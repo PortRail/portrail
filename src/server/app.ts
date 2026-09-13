@@ -4,6 +4,7 @@ import { ensure, fail, PortrailError } from "../contracts/errors.ts";
 import type { Gateway } from "../core/gateway.ts";
 import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
+import { obj, optNum, optStr, str } from "./body.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
 import { digest, equal, id as newId, now, type Store, type PortrailEvent } from "../store/index.ts";
 import { TERMINAL_STATES, type AgentId } from "../types.ts";
@@ -135,7 +136,11 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     return principal;
   };
 
-  const body = (request: FastifyRequest) => (request.body ?? {}) as Record<string, any>;
+  const body = (request: FastifyRequest): Record<string, unknown> => {
+    const value = request.body ?? {};
+    ensure(typeof value === "object" && !Array.isArray(value), 400, "INVALID_REQUEST", "The request body must be a JSON object.");
+    return value as Record<string, unknown>;
+  };
   const params = (request: FastifyRequest) => request.params as Record<string, string>;
 
   /**
@@ -210,22 +215,23 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
       "wait must be 0–3600 seconds.",
     );
 
-    const run = idempotent(request, principal.keyId, () =>
-      gateway.createRun({
-        sessionId: input.session,
-        workspace: input.workspace,
-        agent: input.agent as AgentId | undefined,
-        prompt: String(input.prompt ?? ""),
-        model: input.model,
-        maxSeconds: input.maxSeconds,
-        keyId: principal.keyId,
-        // Fields the free core carries for Pro: callback URL and anything under metadata.
-        metadata: {
-          ...(input.metadata && typeof input.metadata === "object" ? input.metadata : {}),
-          ...(typeof input.callback === "string" ? { callback: input.callback } : {}),
-        },
-      }),
-    );
+    // Validate before the idempotency lookup, so a malformed retry cannot replay a stored run.
+    const callback = optStr(input, "callback");
+    const create = {
+      sessionId: optStr(input, "session"),
+      workspace: optStr(input, "workspace"),
+      agent: optStr(input, "agent") as AgentId | undefined,
+      prompt: optStr(input, "prompt") ?? "",
+      model: optStr(input, "model"),
+      maxSeconds: optNum(input, "maxSeconds"),
+      keyId: principal.keyId,
+      // Fields the free core carries for Pro: callback URL and anything under metadata.
+      metadata: {
+        ...(obj(input, "metadata", { maxBytes: 16 * 1024 }) ?? {}),
+        ...(callback !== undefined ? { callback } : {}),
+      },
+    };
+    const run = idempotent(request, principal.keyId, () => gateway.createRun(create));
 
     if (!wait) return reply.code(202).send(runView(run));
 
@@ -274,7 +280,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   app.post(`${API_PREFIX}/runs/:runId/reply`, async (request) => {
     auth(request, "runs:write");
-    await gateway.steer(params(request).runId!, String(body(request).text ?? ""));
+    await gateway.steer(params(request).runId!, str(body(request), "text"));
     return runView(gateway.run(params(request).runId!));
   });
 
@@ -437,7 +443,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   app.post(`${API_PREFIX}/workspaces`, async (request, reply) => {
     auth(request, "workspaces:admin");
     const input = body(request);
-    return reply.code(201).send(gateway.addWorkspace({ name: String(input.name ?? ""), root: String(input.root ?? "") }));
+    return reply.code(201).send(gateway.addWorkspace({ name: str(input, "name"), root: str(input, "root") }));
   });
   app.delete(`${API_PREFIX}/workspaces/:ref`, async (request, reply) => {
     auth(request, "workspaces:admin");
@@ -463,9 +469,9 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     auth(request, "keys:admin");
     const input = body(request);
     const created = keys.create({
-      name: String(input.name ?? ""),
-      scopes: input.scopes,
-      expiresInDays: input.expiresInDays ?? null,
+      name: str(input, "name"),
+      scopes: input.scopes as string[] | undefined,
+      expiresInDays: optNum(input, "expiresInDays") ?? null,
       policy: input.policy,
     });
     // The only time the token is ever visible.
