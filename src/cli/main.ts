@@ -1,4 +1,4 @@
-import { parseArgs, flagBool, flagString } from "./args.ts";
+import { BOOLEAN_FLAGS, parseArgs, flagBool, flagString } from "./args.ts";
 import { COMMAND_HELP, HELP } from "./help.ts";
 import { PortrailError } from "../contracts/errors.ts";
 import { version } from "../runtime.ts";
@@ -17,7 +17,7 @@ ${commands.map(([name, command]) => `  ${name.padEnd(width + 2)}${command.descri
 }
 
 async function main(): Promise<number> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv.slice(2), { booleans: BOOLEAN_FLAGS });
   const json = flagBool(args, "json");
   const home = flagString(args, "home");
 

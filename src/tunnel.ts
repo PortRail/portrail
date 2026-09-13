@@ -47,12 +47,17 @@ export interface Tunnel {
  * works from any network. The tunnel process is a child of the daemon and dies
  * with it.
  */
+export const TUNNEL_KINDS: readonly TunnelKind[] = TUNNELS.map((entry) => entry.kind);
+export const isTunnelKind = (value: unknown): value is TunnelKind =>
+  typeof value === "string" && (TUNNEL_KINDS as readonly string[]).includes(value);
+
 export function openTunnel(
   kind: TunnelKind,
   port: number,
   options: { timeoutMs?: number; onLog?: (line: string) => void } = {},
 ): Promise<Tunnel> {
-  const spec = TUNNELS.find((entry) => entry.kind === kind)!;
+  const spec = TUNNELS.find((entry) => entry.kind === kind);
+  if (!spec) return Promise.reject(new Error(`Unknown tunnel "${kind}". Choose ${TUNNEL_KINDS.join(", ")}.`));
   const found = findExecutable(spec.binary);
   if (!found)
     return Promise.reject(
