@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { id as newId, now } from "../../store/index.ts";
 import { PortrailError } from "../../contracts/errors.ts";
 import { claudeSdkAvailable, detectClaudeCredentials, findExecutable } from "../detect.ts";
@@ -23,6 +24,11 @@ export interface ClaudeProviderOptions {
    * "best-effort": the run continues without it and says so in a warning event.
    */
   sandbox?: "required" | "best-effort";
+  /**
+   * The operator's `read:` deny patterns, workspace-relative, so the OS sandbox refuses
+   * them too. Defence in depth for sandboxed commands; the gateway is the decision.
+   */
+  denyRead?: readonly string[];
   /** Test seam: a stand-in for the SDK module, so the hook wiring can be exercised without inference. */
   sdk?: Pick<Sdk, "query"> | null;
 }
@@ -172,7 +178,7 @@ export class ClaudeProvider implements Provider {
 
   async start(context: RunContext): Promise<ProviderHandle> {
     const sdk = this.options.sdk ?? (await loadSdk());
-    const run = new ClaudeRun(sdk, this.baseOptions(), context, this.options.maxBudgetUsd ?? null, this.options.sandbox ?? "required");
+    const run = new ClaudeRun(sdk, this.baseOptions(), context, this.options.maxBudgetUsd ?? null, this.options.sandbox ?? "required", this.options.denyRead ?? []);
     try {
       await run.begin();
     } catch (error) {
@@ -197,6 +203,7 @@ class ClaudeRun implements ProviderHandle {
     private readonly context: RunContext,
     budget: number | null,
     private readonly sandboxMode: "required" | "best-effort" = "required",
+    private readonly denyRead: readonly string[] = [],
   ) {
     this.budget = budget;
     this.done = new Promise<RunOutcome>((resolve) => {
@@ -268,7 +275,8 @@ class ClaudeRun implements ProviderHandle {
           filesystem: {
             allowWrite: [context.workspace.root],
             denyWrite: SANDBOX_DENY_READ,
-            denyRead: SANDBOX_DENY_READ,
+            // A workspace-relative rule is anchored at this workspace; `**/x` already matches anywhere.
+            denyRead: [...SANDBOX_DENY_READ, ...this.denyRead.map((glob) => (glob.startsWith("**/") ? glob : join(context.workspace.root, glob)))],
           },
         },
         systemPrompt: {

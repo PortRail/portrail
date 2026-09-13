@@ -198,3 +198,25 @@ test("cancelling interrupts the SDK and ends the run as cancelled", async () => 
   assert.equal(outcome.state, "cancelled");
   handle.close();
 });
+
+test("the operator's read denies are enforced by the sandbox as well, translated to the workspace", async () => {
+  const sdk = fakeSdk(async (_captured, emit) => {
+    emit(init());
+    emit({ type: "result", subtype: "success", result: "done", total_cost_usd: 0.01 });
+  });
+  const root = mkdtempSync(join(tmpdir(), "portrail-ws-"));
+  const provider = new ClaudeProvider({ sdk: sdk as any, denyRead: ["confidential/**", "**/*.key", ".secrets"] });
+  const events: ProviderEvent[] = [];
+  const abort = new AbortController();
+  const handle = await provider.start({
+    sessionId: "ses_test", runId: "run_test",
+    workspace: { id: "ws_test", name: "work", root, createdAt: new Date().toISOString() },
+    prompt: "p", maxSeconds: 30, signal: abort.signal, emit: (event) => events.push(event), decide: async () => ({ verdict: "allow", reason: "" }),
+  });
+  await handle.done;
+  const denyRead: string[] = sdk.captured[0]!.options.sandbox.filesystem.denyRead;
+  assert.ok(denyRead.includes(join(root, "confidential/**")), "a workspace-relative rule is anchored at the workspace");
+  assert.ok(denyRead.includes("**/*.key"), "a rule that already matches anywhere stays as it is");
+  assert.ok(denyRead.includes(join(root, ".secrets")));
+  assert.ok(denyRead.includes("**/.env"), "the built-in list is still there");
+});
