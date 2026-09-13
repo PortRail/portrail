@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Portrail",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "An HTTP API in front of Codex and Claude Code running on your own machine. Every route under /v1 needs a bearer API key. Any route may answer 429 TOO_MANY_FAILURES with a Retry-After header after ten failed authentications from one address within a minute.",
     "license": {
       "name": "MIT"

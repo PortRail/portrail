@@ -83,6 +83,9 @@ terminal:
 portrail logs
 ```
 
+History is kept for thirty days (`retentionDays` in `config.json`); the gateway removes
+older sessions when it starts and every hour, and `portrail prune` does it now.
+
 ## 6. When you want to be asked
 
 The shipped rules say yes or no. For the commands in between, add a pattern to
