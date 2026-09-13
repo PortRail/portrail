@@ -459,13 +459,13 @@ export async function service(args: ParsedArgs): Promise<number> {
       return 0;
     }
     case "uninstall": {
-      const info = uninstallService();
+      const info = uninstallService(dataDir);
       out(json, info, () => `Stopped and removed ${info.unitPath}.`);
       return 0;
     }
     case "status":
     case undefined: {
-      const info = serviceInfo();
+      const info = serviceInfo(process.platform, dataDir);
       out(json, info, () => (info.installed ? `Installed: ${info.unitPath}\n  check: ${info.hints.join("  |  ")}` : "Not installed as a service."));
       return 0;
     }
