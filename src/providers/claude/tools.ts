@@ -64,14 +64,39 @@ export function toolToOperation(
       };
     case "Read":
       return { ...base, kind: "read", paths: [str("file_path") ?? ""] };
-    case "Grep":
-      // Content search: whatever lies under the directory can come back in the output.
+    case "Grep": {
+      // Content search: whatever lies under the directory can come back in the output —
+      // narrowed by the glob and type the tool passes on to rg.
+      const glob = str("glob");
+      const type = str("type");
+      const globs = glob
+        ? [
+            {
+              pattern: glob.replace(/^!/, ""),
+              exclude: glob.startsWith("!"),
+              dialect: "rg" as const,
+            },
+          ]
+        : [];
+      const types = type ? [type] : [];
       return {
         ...base,
         kind: "read",
         recursive: true,
         paths: [str("path") ?? workspaceRoot],
+        ...(globs.length || types.length
+          ? {
+              filter: {
+                globs,
+                types,
+                unmatched: globs.some((entry) => !entry.exclude)
+                  ? ("drop" as const)
+                  : ("keep" as const),
+              },
+            }
+          : {}),
       };
+    }
     case "Glob": {
       // Names only — but a pattern that starts elsewhere or climbs out is judged as that place.
       const from = str("path") ?? workspaceRoot;

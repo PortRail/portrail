@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import type { Operation } from "../src/types.ts";
+import type { Operation, SearchFilter, SearchGlob } from "../src/types.ts";
 import type { DecisionContext } from "../src/extension.ts";
 
 const context: DecisionContext = {
@@ -646,5 +646,84 @@ test("a search that honours .gitignore does not reach what git ignores, and only
     (await defaults.decide(search, ctx)).verdict,
     "allow",
     "the search tool skips what git ignores",
+  );
+});
+
+test("a glob can be compiled case-sensitively when the tool that owns it is", () => {
+  assert.ok(!globToRegExp(".ENV", true, { ignoreCase: false }).test(".env"));
+  assert.ok(globToRegExp(".ENV", true).test(".env"), "rules stay case-insensitive");
+  assert.ok(globToRegExp("*.TS", false, { ignoreCase: true }).test("a.ts"));
+});
+
+test("a search that filters what it opens is judged by those files only", async () => {
+  const ws = searchable();
+  const ctx = { ...context, workspaceRoot: ws };
+  const rg = (pattern: string, extra: Partial<SearchGlob> = {}): SearchGlob => ({
+    pattern: pattern.replace(/^!/, ""),
+    exclude: pattern.startsWith("!"),
+    dialect: "rg",
+    ...extra,
+  });
+  const search = (globs: SearchGlob[], types: string[] = []): Operation => ({
+    ...base,
+    kind: "read",
+    recursive: true,
+    paths: [ws],
+    filter: {
+      globs,
+      types,
+      unmatched: globs.some((glob) => !glob.exclude) ? "drop" : "keep",
+    } satisfies SearchFilter,
+  });
+  const defaults = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const verdict = async (operation: Operation, decider = defaults) =>
+    (await decider.decide(operation, ctx)).verdict;
+
+  assert.equal(
+    await verdict(search([rg("*.ts")])),
+    "allow",
+    "the search never opens .env",
+  );
+  assert.equal(await verdict(search([rg("!.env")])), "allow");
+  assert.equal(await verdict(search([rg("*.env")])), "deny");
+  assert.equal(await verdict(search([], ["ts"])), "allow");
+  assert.equal(
+    await verdict(search([], ["sh"])),
+    "deny",
+    "sh covers .env, so nothing is narrowed",
+  );
+  assert.equal(
+    await verdict(search([rg("!.env"), rg(".env")])),
+    "deny",
+    "the later glob reopens .env, as in rg",
+  );
+  assert.equal(
+    await verdict(search([rg("!.ENV")])),
+    "deny",
+    "rg excludes are case-sensitive",
+  );
+  assert.equal(
+    await verdict(search([rg("*.[t]s")])),
+    "deny",
+    "an include we cannot read disables narrowing",
+  );
+
+  const confidential = new BuiltinDecider({
+    allow: ["read:**"],
+    deny: ["read:confidential/**"],
+  });
+  assert.equal(await verdict(search([]), confidential), "deny");
+  assert.equal(await verdict(search([rg("!confidential")]), confidential), "allow");
+
+  const narrow = new BuiltinDecider({ allow: ["read:src/**"], deny: [] });
+  assert.equal(
+    await verdict(search([]), narrow),
+    "deny",
+    "the whole tree is more than src",
+  );
+  assert.equal(
+    await verdict(search([rg("*.ts")]), narrow),
+    "allow",
+    "the allow list must cover only what the search opens",
   );
 });

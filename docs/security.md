@@ -25,7 +25,8 @@ is to be the point where that attempt is seen and can be refused.
   quoted. A command that names a file is also judged as a read of that file by its real
   path, so `cat innocent.txt` is refused when `innocent.txt` links to `.env`. Searches
   over a directory (`grep -r`, `rg`, `diff -r`, Claude's Grep) are judged by every file
-  they can reach.
+  they can reach, narrowed by the include and exclude filters the tool was given when
+  Portrail can read them with confidence.
 - **A command is judged as what the shell would run, or not at all.** The line is split
   on every operator (`&&`, `||`, `;`, `|`, `&`, newlines) and every segment must pass;
   quotes are removed before matching; a substitution, a redirect (other than to

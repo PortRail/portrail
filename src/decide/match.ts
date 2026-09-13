@@ -5,7 +5,11 @@
  * bare `x` at the root. Command mode: `*` matches anything, because a command line
  * has no meaningful segments and `git commit *` should match the whole tail.
  */
-export function globToRegExp(pattern: string, pathMode: boolean): RegExp {
+export function globToRegExp(
+  pattern: string,
+  pathMode: boolean,
+  options: { ignoreCase?: boolean } = {},
+): RegExp {
   let source = "^";
   for (let index = 0; index < pattern.length; index++) {
     const character = pattern[index]!;
@@ -28,9 +32,10 @@ export function globToRegExp(pattern: string, pathMode: boolean): RegExp {
       source += character.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     }
   }
-  // Case-insensitive for every kind: APFS and NTFS are, so ".ENV" is ".env" — and a
-  // command that names it is the same command however it is capitalised.
-  return new RegExp(source + "$", "i");
+  // Case-insensitive for every rule kind: APFS and NTFS are, so ".ENV" is ".env" — and a
+  // command that names it is the same command however it is capitalised. A tool's own
+  // glob (rg -g) is case-sensitive and asks for that explicitly.
+  return new RegExp(source + "$", options.ignoreCase === false ? "" : "i");
 }
 
 export interface Pattern {
