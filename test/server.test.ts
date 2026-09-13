@@ -237,3 +237,66 @@ test("run bodies are validated, not coerced", async () => {
   assert.equal(s.gateway.listRuns().length, 0, "nothing malformed became a run");
   await s.close();
 });
+
+test("an unexpected error is logged with the request id the client sees", async () => {
+  const s = await serverWithKey();
+  s.gateway.listWorkspaces = () => { throw new Error("disk on fire"); };
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...parts: unknown[]) => lines.push(parts.join(" "));
+  let response;
+  try {
+    response = await s.app.inject({ method: "GET", url: "/v1/workspaces", headers: s.headers });
+  } finally {
+    console.error = original;
+  }
+  assert.equal(response.statusCode, 500);
+  const requestId = response.json().error.requestId as string;
+  assert.ok(requestId.startsWith("req"));
+  assert.ok(lines.some((line) => line.includes(requestId) && line.includes("GET /v1/workspaces") && line.includes("disk on fire")), lines.join("\n"));
+  await s.close();
+});
+
+test("the operations of a run that does not exist are a 404, and an empty run id is not every run", async () => {
+  const s = await serverWithKey();
+  await s.app.inject({ method: "POST", url: "/v1/runs", headers: s.headers, payload: { agent: "fake", workspace: "work", prompt: script([{ exec: "npm test" }]), wait: 5 } });
+  assert.equal((await s.app.inject({ method: "GET", url: "/v1/runs/run_nope/operations", headers: s.headers })).statusCode, 404);
+  const empty = await s.app.inject({ method: "GET", url: "/v1/runs//operations", headers: s.headers });
+  assert.equal(empty.statusCode, 404);
+  await s.close();
+});
+
+test("an idempotent retry answers with the run as it stands now", async () => {
+  const s = await serverWithKey();
+  const headers = { ...s.headers, "idempotency-key": "retry-me-please" };
+  const payload = { agent: "fake", workspace: "work", prompt: script([{ text: "quick" }]) };
+  const first = await s.app.inject({ method: "POST", url: "/v1/runs", headers, payload });
+  assert.equal(first.statusCode, 202);
+  assert.equal(first.json().state, "queued");
+  await untilDone(s.gateway, first.json().id);
+  const retry = await s.app.inject({ method: "POST", url: "/v1/runs", headers, payload });
+  assert.equal(retry.json().id, first.json().id, "the same run");
+  assert.equal(retry.json().state, "succeeded", "as it stands now, not as it was stored");
+  await s.close();
+});
+
+test("the bearer scheme is accepted in any letter case", async () => {
+  const s = await serverWithKey();
+  assert.equal((await s.app.inject({ method: "GET", url: "/v1/runs", headers: { authorization: `bearer ${s.token}` } })).statusCode, 200);
+  assert.equal((await s.app.inject({ method: "GET", url: "/v1/runs", headers: { authorization: `BEARER  ${s.token}` } })).statusCode, 200);
+  assert.equal((await s.app.inject({ method: "GET", url: "/v1/runs", headers: { authorization: `Basic ${s.token}` } })).statusCode, 401);
+  await s.close();
+});
+
+test("local answers need a real loopback address, not just the token", async () => {
+  const ctx = testGateway();
+  const localToken = "local-secret-token";
+  const app = await createApp({ gateway: ctx.gateway, store: ctx.store, keys: new Keys(ctx.store), dataDir: mkdtempSync(join(tmpdir(), "portrail-srv-")), extension: null, localToken, agentStatus: async () => [] });
+  const remote = await app.inject({ method: "GET", url: "/v1/operations/pending", remoteAddress: "10.1.2.3", headers: { "x-portrail-local": localToken } });
+  assert.equal(remote.statusCode, 403);
+  assert.match(remote.json().error.message, /loopback/);
+  const local = await app.inject({ method: "GET", url: "/v1/operations/pending", remoteAddress: "127.0.0.1", headers: { "x-portrail-local": localToken } });
+  assert.equal(local.statusCode, 200);
+  await app.close();
+  await ctx.gateway.shutdown();
+});

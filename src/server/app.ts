@@ -98,9 +98,12 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     });
   });
 
-  app.setErrorHandler((error: any, _request, reply) => {
+  app.setErrorHandler((error: any, request, reply) => {
     if (error instanceof PortrailError) return reply.code(error.status).send(error.toJSON());
     const status = error.statusCode === 413 ? 413 : error.statusCode === 400 ? 400 : error.statusCode === 415 ? 415 : 500;
+    const requestId = newId("req");
+    // The client gets an id and a bland message; the operator gets the id and the cause.
+    if (status === 500) console.error(`${requestId} ${request.method} ${request.url} ${error?.stack ?? error}`);
     return reply.code(status).send({
       error: {
         code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_REQUEST" : status === 415 ? "UNSUPPORTED_MEDIA_TYPE" : "INTERNAL_ERROR",
@@ -109,7 +112,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
             ? "Portrail could not complete the request."
             : (error.message ?? "Malformed request."),
         retryable: false,
-        requestId: newId("req"),
+        requestId,
       },
     });
   });
@@ -118,10 +121,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     reply.code(404).send({ error: { code: "NOT_FOUND", message: "No such route.", retryable: false } }),
   );
 
-  const bearer = (request: FastifyRequest) => {
-    const header = request.headers.authorization;
-    return header?.startsWith("Bearer ") ? header.slice(7).trim() : undefined;
-  };
+  // The scheme is case-insensitive (RFC 7235); proxies and clients spell it as they like.
+  const bearer = (request: FastifyRequest) => /^bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
 
   /** Authenticate and check one scope. Attaches the principal to the request. */
   const auth = (request: FastifyRequest, scope: Scope): Principal => {
@@ -148,7 +149,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
    * stored response; the same key with a different body is a conflict. Automations
    * retry, and a retried "start a run" must never start two.
    */
-  function idempotent<T>(request: FastifyRequest, principal: string, execute: () => T): T {
+  function idempotent<T extends { id: string }>(request: FastifyRequest, principal: string, execute: () => T, recall: (stored: { id: string }) => T): T {
     const key = request.headers["idempotency-key"];
     if (key === undefined) return execute();
     ensure(
@@ -170,12 +171,13 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
           "IDEMPOTENCY_CONFLICT",
           "This Idempotency-Key was already used with a different request body.",
         );
-        return JSON.parse(previous.response) as T;
+        // Only the id is remembered; the caller reads the current state, not a stale copy.
+        return recall(JSON.parse(previous.response) as { id: string });
       }
       const result = execute();
       store.db
         .prepare("INSERT INTO commands VALUES(?,?,?,?,?,?)")
-        .run(principal, route, key, hash, JSON.stringify(result), now());
+        .run(principal, route, key, hash, JSON.stringify({ id: result.id }), now());
       return result;
     });
   }
@@ -231,7 +233,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
         ...(callback !== undefined ? { callback } : {}),
       },
     };
-    const run = idempotent(request, principal.keyId, () => gateway.createRun(create));
+    const run = idempotent(request, principal.keyId, () => gateway.createRun(create), ({ id }) => gateway.run(id));
 
     if (!wait) return reply.code(202).send(runView(run));
 
@@ -286,7 +288,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   app.get(`${API_PREFIX}/runs/:runId/operations`, async (request) => {
     auth(request, "runs:read");
-    return { items: gateway.listOperations({ runId: params(request).runId! }) };
+    const run = gateway.run(params(request).runId!);
+    return { items: gateway.listOperations({ runId: run.id }) };
   });
 
   // ------------------------------------------------------- local answers
@@ -301,7 +304,7 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     ensure(equal(typeof given === "string" ? given : "", expected), 403, "FORBIDDEN", "Answers are accepted only from this machine (X-Portrail-Local from daemon.json).");
     // Belt and braces: even with the token, the connection itself must be local.
     const from = request.socket?.remoteAddress ?? "";
-    ensure(from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1" || from === "", 403, "FORBIDDEN", "Answers are accepted only over the loopback interface.");
+    ensure(from === "127.0.0.1" || from === "::1" || from === "::ffff:127.0.0.1", 403, "FORBIDDEN", "Answers are accepted only over the loopback interface.");
   };
 
   app.get(`${API_PREFIX}/operations/pending`, async (request) => {
