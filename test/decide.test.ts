@@ -325,3 +325,47 @@ test("the built-in allow list names whole commands, and the deny list covers the
     "date", "date +%Y", "uname -a", "sed -n '1,40p' src/a.ts",
   ]) assert.equal((await decider.decide(exec(command), context)).verdict, "allow", command);
 });
+
+test("sed may only print or filter: no writing, reading, executing, in-place editing or script files", async () => {
+  const decider = new BuiltinDecider(DEFAULT_CONFIG.decide);
+  const exec = (command: string): Operation => ({ ...base, kind: "exec", command, cwd: "/work" });
+  for (const command of [
+    "sed -n '1,240p' src/a.ts",
+    "sed -n '10p' f",
+    "sed -n '/^import/p' f",
+    "sed -n '/start/,/end/p' f",
+    "sed -n '$=' f",
+    "sed -n -e '1p' -e '5p' f",
+    "sed -n '1p;5p;$p' f",
+    "sed -n 's/foo/bar/p' f",
+    "sed -n 's/a\\/b/c/gp' f",
+    "sed -nE '/^(a|b)/p' f",
+    "sed -n '5!p' f",
+    "sed -n 'l' f",
+    "sed -n 'y/abc/xyz/;p' f",
+    "sed -n '0,/x/p' f",
+  ]) assert.equal((await decider.decide(exec(command), context)).verdict, "allow", command);
+  for (const command of [
+    "sed -n 1w/tmp/x README.md",
+    "sed -n '1w /tmp/x' f",
+    "sed -n 'W /tmp/x' f",
+    "sed -n 's/a/b/w /tmp/x' f",
+    "sed -n 's/a/b/e' f",
+    "sed -n -i 's/a/b/' f",
+    "sed -ni 's/a/b/' f",
+    "sed -n --in-place 's/a/b/' f",
+    "sed -i '' 's/a/b/' f",
+    "sed -n 'e whoami' f",
+    "sed -n 'r /etc/passwd' f",
+    "sed -n 'R x' f",
+    "sed -n -f script.sed f",
+    "sed -n --file=x f",
+    "sed -n 's|a|b|p' f",
+    "sed -n '1,10{p}' f",
+    "sed -n '1~2p' f",
+  ]) {
+    const decision = await decider.decide(exec(command), context);
+    assert.equal(decision.verdict, "deny", command);
+    assert.match(decision.reason, /print or filter|No allow rule/, command);
+  }
+});

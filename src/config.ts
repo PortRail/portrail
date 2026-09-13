@@ -93,8 +93,8 @@ export const DEFAULT_CONFIG: PortrailConfig = {
       "exec:cat *",
       "exec:head *",
       "exec:tail *",
-      // Only scripts that print or filter pass; see the sed check in the decider.
-      "exec:sed -n *",
+      // sed is a language: the decider lets through only scripts that print or filter.
+      "exec:sed *",
       "exec:rg *",
       "exec:grep *",
       "exec:find *",

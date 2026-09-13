@@ -3,6 +3,7 @@ import type { Decider, DecisionContext } from "../extension.ts";
 import type { Decision, Operation } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
+import { sedObjection } from "./sed.ts";
 
 /** One segment of a command line, in the forms a rule may be matched against. */
 export interface CommandSegment {
@@ -396,6 +397,19 @@ export class BuiltinDecider implements Decider {
         reason: `Refused by the deny list (${denied.source}).`,
         rule: denied.source,
       };
+
+    // sed is allowed for reading, so its script must be one that only reads.
+    if (operation.kind === "exec")
+      for (const segment of parseCommand(operation.command).segments) {
+        const program = segment.words.slice(segment.programIndex);
+        if (!["sed", "gsed"].includes(basename(program[0] ?? ""))) continue;
+        const objection = sedObjection(program);
+        if (objection)
+          return {
+            verdict: "deny",
+            reason: `Refused: only sed scripts that print or filter are allowed (${objection}). Use -n or -E with p, d, s/…/…/ and addresses; w, r, e, -i and -f cannot be judged by a rule.`,
+          };
+      }
 
     // Every path in a multi-file change, and every segment of a command, must be allowed.
     if (everySubjectMatches(this.allow, operation.kind, values)) {
