@@ -4,6 +4,10 @@ import type { Decision, Operation } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
 import { shellSplit } from "../providers/codex/shell.ts";
 import { sedObjection } from "./sed.ts";
+import { gitIgnored } from "./ignored.ts";
+import { recursiveReadOf } from "./recursive.ts";
+import { REACH_LIMIT, reachableFiles } from "../core/reach.ts";
+import { statSync } from "node:fs";
 
 /** One segment of a command line, in the forms a rule may be matched against. */
 export interface CommandSegment {
@@ -263,6 +267,14 @@ function leadingAssignment(segment: string): { rest: string; refused: string | n
 }
 
 /** The values a rule is matched against, per operation kind. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** A path as the rules see it: relative to the workspace, forward slashes. */
 function relativise(workspaceRoot: string, path: string): string {
   const full = resolve(workspaceRoot, path);
@@ -345,10 +357,50 @@ export class BuiltinDecider implements Decider {
   private readonly deny: Pattern[];
   private readonly ask: Pattern[];
 
-  constructor(lists: { allow: readonly string[]; deny: readonly string[]; ask?: readonly string[] }) {
+  private readonly reachLimit: number;
+
+  constructor(
+    lists: { allow: readonly string[]; deny: readonly string[]; ask?: readonly string[] },
+    options: { reachLimit?: number } = {},
+  ) {
     this.allow = parsePatterns(lists.allow);
     this.deny = parsePatterns(lists.deny);
     this.ask = parsePatterns(lists.ask ?? []);
+    this.reachLimit = options.reachLimit ?? REACH_LIMIT;
+  }
+
+  /**
+   * A search over a directory is judged by every file it can reach. A reached file the
+   * deny list names refuses the search — unless the tool honours .gitignore and git
+   * says the file is ignored, because then the tool never opens it. Everything reached
+   * joins the subjects, so the allow list must cover it too.
+   */
+  private async reach(
+    dirs: readonly string[],
+    search: { hidden: boolean; follow: boolean; respectsIgnore: boolean },
+    root: string,
+  ): Promise<{ refused: Decision | null; reached: Array<{ where: string; subjects: Subject[] }> }> {
+    const reached: Array<{ where: string; subjects: Subject[] }> = [];
+    for (const dir of dirs) {
+      if (!isDirectory(dir)) continue;
+      const reach = reachableFiles(dir, root, { hidden: search.hidden, follow: search.follow, limit: this.reachLimit });
+      const where = relativise(root, dir);
+      const refuse = (reason: string, rule?: string): { refused: Decision; reached: [] } => ({ refused: { verdict: "deny", reason, ...(rule ? { rule } : {}) }, reached: [] });
+      if (reach.truncated)
+        return refuse(`Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.`);
+      if (reach.outside)
+        return refuse(`Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`);
+      const named = reach.files.map((file) => [file, relativise(root, file)] as const);
+      const denied = named.filter(([, relativePath]) => firstMatch(this.deny, "read", [relativePath]));
+      const ignored = denied.length && search.respectsIgnore ? await gitIgnored(root, denied.map(([file]) => file)) : new Set<string>();
+      const first = denied.find(([file]) => !ignored.has(file));
+      if (first) {
+        const rule = firstMatch(this.deny, "read", [first[1]])!;
+        return refuse(`Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`, rule.source);
+      }
+      reached.push({ where, subjects: named.filter(([file]) => !ignored.has(file)).map(([, relativePath]) => plain(relativePath)) });
+    }
+    return { refused: null, reached };
   }
 
   async decide(
@@ -373,6 +425,28 @@ export class BuiltinDecider implements Decider {
       else
         return { verdict: "deny", reason: `Refused: a ${operation.kind} operation with nothing declared.` };
     }
+
+    // Claude's Grep runs `rg --hidden`: dotfiles too, symlinks not followed, .gitignore honoured.
+    if (operation.kind === "read" && operation.recursive) {
+      const { refused, reached } = await this.reach(operation.paths, { hidden: true, follow: false, respectsIgnore: true }, context.workspaceRoot);
+      if (refused) return refused;
+      // The search reads the files, not the directory entry: the allow list must cover those.
+      for (const { where, subjects: files } of reached) {
+        if (!files.length) continue;
+        const own = values.findIndex((subject) => subject.allow[0] === where);
+        if (own >= 0) values.splice(own, 1);
+        values.push(...files);
+      }
+    }
+
+    // `grep -r`, `rg`, `diff -r`: a command that searches a directory reaches what is in it.
+    if (operation.kind === "exec")
+      for (const segment of parseCommand(operation.command).segments) {
+        const search = recursiveReadOf(segment.words.slice(segment.programIndex), operation.cwd);
+        if (!search) continue;
+        const { refused } = await this.reach(search.dirs, search, context.workspaceRoot);
+        if (refused) return refused;
+      }
 
     if (operation.kind === "exec") {
       // A command that names a file is a read of that file, whatever the file is called

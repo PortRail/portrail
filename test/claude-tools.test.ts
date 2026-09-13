@@ -65,3 +65,24 @@ test("the governed tool list never includes subagents or task tools", () => {
   assert.ok(GOVERNED_TOOLS.includes("Bash"));
   assert.ok(GOVERNED_TOOLS.includes("Edit"));
 });
+
+test("a Grep is a search over a directory, and a Glob pattern that points somewhere is judged as that place", () => {
+  const grep = toolToOperation("Grep", { pattern: "x" }, base, root);
+  assert.equal(grep?.kind, "read");
+  if (grep?.kind === "read") {
+    assert.equal(grep.recursive, true, "every file beneath the searched directory may be read");
+    assert.deepEqual(grep.paths, [root]);
+  }
+  const scoped = toolToOperation("Grep", { pattern: "x", path: "/work/src" }, base, root);
+  if (scoped?.kind === "read") assert.deepEqual(scoped.paths, ["/work/src"]);
+
+  const anywhere = toolToOperation("Glob", { pattern: "**/*.ts" }, base, root);
+  if (anywhere?.kind === "read") {
+    assert.deepEqual(anywhere.paths, [root]);
+    assert.ok(!anywhere.recursive, "Glob lists names, it does not read content");
+  }
+  const absolute = toolToOperation("Glob", { pattern: "/etc/*" }, base, root);
+  if (absolute?.kind === "read") assert.ok(absolute.paths.includes("/etc"), absolute.paths.join(","));
+  const climbing = toolToOperation("Glob", { pattern: "../x/**" }, base, root);
+  if (climbing?.kind === "read") assert.ok(climbing.paths.includes("/x"), climbing.paths.join(","));
+});

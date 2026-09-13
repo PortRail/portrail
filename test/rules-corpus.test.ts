@@ -136,6 +136,17 @@ const rows: Row[] = [
   deny("echo hi > out.txt", /redirect/),
   deny("cat x $(rm -rf ~)", /substitution/),
 
+  // A search over a directory is judged by what it can reach; rg hides dotfiles unless told otherwise.
+  allow("rg API_KEY"),
+  deny("grep -r API_KEY .", /reaches \.env/),
+  deny("grep -R x .", /reaches \.env|out of the workspace/),
+  deny("rg --hidden API_KEY", /reaches \.env/),
+  deny("rg -uuu API_KEY .", /reaches \.env/),
+  deny("grep -rn foo -- .", /reaches \.env/),
+  deny("diff -r . src", /reaches \.env|out of the workspace/),
+  allow("diff -r sub/deep src"),
+  deny("rg foo confidential", /confidential/, { lists: CUSTOM }),
+
   // Read-only tools with a write or run switch, and prefix look-alikes.
   deny("sed -n 1w/tmp/x README.md", /print or filter/),
   deny("sed -n -i s/a/b/ README.md", /print or filter/),

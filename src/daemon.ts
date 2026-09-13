@@ -58,7 +58,12 @@ export async function assemble(options: DaemonOptions = {}): Promise<Omit<Daemon
 
   const providers = new Map<AgentId, Provider>();
   providers.set("codex", new CodexProvider({ executablePath: config.agents.codex.path, dataDir }));
-  providers.set("claude", new ClaudeProvider({ executablePath: config.agents.claude.path, maxBudgetUsd: config.run.maxBudgetUsd, sandbox: config.agents.claude.sandbox }));
+  providers.set("claude", new ClaudeProvider({
+    executablePath: config.agents.claude.path,
+    maxBudgetUsd: config.run.maxBudgetUsd,
+    sandbox: config.agents.claude.sandbox,
+    denyRead: config.decide.deny.filter((rule) => rule.startsWith("read:")).map((rule) => rule.slice("read:".length)),
+  }));
   if (options.fake) providers.set("fake", new FakeProvider());
 
   const loaded = options.noExtension ? { extension: null, detail: "disabled" } : await loadExtension();
