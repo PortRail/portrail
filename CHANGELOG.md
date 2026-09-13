@@ -32,9 +32,18 @@ All notable changes to Portrail are recorded here. The format follows
 - Retention now runs when the daemon starts, not only an hour later, so sessions that
   piled up while no daemon ran are removed before it listens. A session's records are
   deleted in bulk.
+- When a token refresh replaced the Codex login link under `~/.portrail/codex` with a
+  regular file, every later Codex run failed with `EEXIST` and the token stayed inside
+  the data directory. Portrail now moves a newer token back to the real `auth.json`,
+  drops an identical or older copy, and restores the link.
+- A tunnel URL that arrived split across two output chunks, or without a trailing
+  newline, was not recognised and the start timed out. Tunnel output is now read line
+  by line per stream.
+- `scripts/install-test.sh` picks a free port instead of assuming 7499.
 
 ### Changed
 
+- Dependabot keeps the pinned GitHub Actions in CI current.
 - Runs, operations and keys are found through indexed columns instead of reading every
   record: creating a run, dispatching the queue, answering a permission question,
   authenticating a key and listing runs or operations no longer slow down as history
