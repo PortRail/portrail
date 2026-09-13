@@ -194,7 +194,9 @@ export async function status(args: ParsedArgs): Promise<number> {
     return 1;
   }
   try {
+    // The local token from daemon.json is what unlocks agent and extension details.
     const response = await fetch(`${running.url}/health`, {
+      headers: running.localToken ? { "x-portrail-local": running.localToken } : {},
       signal: AbortSignal.timeout(3000),
     });
     const health = (await response.json()) as Record<string, unknown>;

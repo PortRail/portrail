@@ -125,7 +125,7 @@ test("an extension swaps the decider, mounts routes, and resolves parked operati
   assert.ok(pro.seen.includes("run.completed"));
 
   // Health reports the extension.
-  const health = (await app.inject({ method: "GET", url: "/health" })).json();
+  const health = (await app.inject({ method: "GET", url: "/health", headers })).json();
   assert.deepEqual(health.pro, {
     name: "fake-pro",
     version: "0.0.0-test",
@@ -148,7 +148,22 @@ test("without an extension, /health says so and no pro routes exist", async () =
     extension: null,
     agentStatus: async () => [],
   });
-  assert.equal((await app.inject({ method: "GET", url: "/health" })).json().pro, null);
+  const anonymous = (await app.inject({ method: "GET", url: "/health" })).json();
+  assert.ok(
+    !("pro" in anonymous),
+    "without a credential, health says nothing about extensions",
+  );
+  const { token } = keys.create({ name: "t" });
+  assert.equal(
+    (
+      await app.inject({
+        method: "GET",
+        url: "/health",
+        headers: { authorization: `Bearer ${token}` },
+      })
+    ).json().pro,
+    null,
+  );
   assert.equal(
     (await app.inject({ method: "GET", url: "/v1/pending" })).statusCode,
     404,

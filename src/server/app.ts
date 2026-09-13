@@ -245,26 +245,46 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
 
   // -------------------------------------------------------------- health
 
-  app.get("/health", async () => ({
-    status: "ok",
-    version,
-    agents: await options.agentStatus().then((agents) =>
-      (agents as Array<{ id: string; ready: boolean }>).map((agent) => ({
-        id: agent.id,
-        ready: agent.ready,
-      })),
-    ),
-    pro: options.extension
-      ? {
-          name: options.extension.name,
-          version: options.extension.version,
-          ...(options.extension.status?.(options.dataDir) ?? {
-            active: true,
-            detail: "",
-          }),
-        }
-      : null,
-  }));
+  // Anyone may ask whether the gateway is up. What runs behind it — which agents are
+  // ready, whether Pro is installed — is for callers who hold a key or the local token:
+  // behind a tunnel this route is public, and a wrong key is refused, not downgraded.
+  const credentialed = (request: FastifyRequest): boolean => {
+    const token = bearer(request);
+    if (token !== undefined) {
+      keys.authenticate(token);
+      return true;
+    }
+    const local = request.headers["x-portrail-local"];
+    return (
+      typeof local === "string" &&
+      typeof options.localToken === "string" &&
+      options.localToken.length > 0 &&
+      equal(local, options.localToken)
+    );
+  };
+  app.get("/health", async (request) => {
+    const liveness = { status: "ok", version };
+    if (!credentialed(request)) return liveness;
+    return {
+      ...liveness,
+      agents: await options.agentStatus().then((agents) =>
+        (agents as Array<{ id: string; ready: boolean }>).map((agent) => ({
+          id: agent.id,
+          ready: agent.ready,
+        })),
+      ),
+      pro: options.extension
+        ? {
+            name: options.extension.name,
+            version: options.extension.version,
+            ...(options.extension.status?.(options.dataDir) ?? {
+              active: true,
+              detail: "",
+            }),
+          }
+        : null,
+    };
+  });
 
   // ---------------------------------------------------------------- runs
 

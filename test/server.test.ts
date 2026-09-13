@@ -673,3 +673,47 @@ test("local answers need a real loopback address, not just the token", async () 
   await app.close();
   await ctx.gateway.shutdown();
 });
+
+test("/health is liveness only without a credential; a key or the local token also reveals agents and pro", async () => {
+  const s = await serverWithKey(["runs:read"]);
+  const anonymous = (await s.app.inject({ method: "GET", url: "/health" })).json();
+  assert.deepEqual(Object.keys(anonymous).sort(), ["status", "version"]);
+  const keyed = (
+    await s.app.inject({ method: "GET", url: "/health", headers: s.headers })
+  ).json();
+  assert.deepEqual(keyed.agents, [{ id: "fake", ready: true }]);
+  assert.equal(keyed.pro, null);
+  const bogus = await s.app.inject({
+    method: "GET",
+    url: "/health",
+    headers: { authorization: "Bearer prt_bogus_bogus_bogus_bogus" },
+  });
+  assert.equal(
+    bogus.statusCode,
+    401,
+    "a wrong key is refused loudly, not treated as anonymous",
+  );
+  await s.close();
+
+  const ctx = testGateway();
+  const localToken = "local-secret-token";
+  const app = await createApp({
+    gateway: ctx.gateway,
+    store: ctx.store,
+    keys: new Keys(ctx.store),
+    dataDir: mkdtempSync(join(tmpdir(), "portrail-srv-")),
+    extension: null,
+    localToken,
+    agentStatus: async () => [{ id: "fake", ready: true }],
+  });
+  const local = (
+    await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: { "x-portrail-local": localToken },
+    })
+  ).json();
+  assert.deepEqual(local.agents, [{ id: "fake", ready: true }]);
+  await app.close();
+  await ctx.gateway.shutdown();
+});
