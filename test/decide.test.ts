@@ -45,6 +45,24 @@ test("path globs stop at slashes unless doubled", () => {
   assert.ok(globToRegExp(".env*", true).test(".env.local"));
 });
 
+test("a backslash escapes the glob character after it, so a literal name stays literal", () => {
+  assert.ok(globToRegExp("report\\?.txt", true).test("report?.txt"));
+  assert.ok(!globToRegExp("report\\?.txt", true).test("report1.txt"));
+  assert.ok(globToRegExp("star\\*.md", true).test("star*.md"));
+  assert.ok(!globToRegExp("star\\*.md", true).test("starry.md"));
+  assert.ok(globToRegExp("a\\[1].ts", true).test("a[1].ts"));
+  assert.ok(
+    globToRegExp("plain\\.txt", true).test("plain.txt"),
+    "escaping a plain character is harmless",
+  );
+  assert.ok(globToRegExp("git commit \\*", false).test("git commit *"));
+  assert.ok(!globToRegExp("git commit \\*", false).test("git commit -m x"));
+  assert.ok(
+    globToRegExp("trailing\\", true).test("trailing\\"),
+    "a lone trailing backslash is itself",
+  );
+});
+
 test("command globs cross spaces, because a command line has no segments", () => {
   assert.ok(globToRegExp("npm test*", false).test("npm test --watch"));
   assert.ok(globToRegExp("git commit *", false).test("git commit -m 'a b c'"));

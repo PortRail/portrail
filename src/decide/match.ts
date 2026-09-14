@@ -3,7 +3,8 @@
  *
  * Path mode: `*` stops at a slash, `**` crosses them, and `**​/x` also matches a
  * bare `x` at the root. Command mode: `*` matches anything, because a command line
- * has no meaningful segments and `git commit *` should match the whole tail.
+ * has no meaningful segments and `git commit *` should match the whole tail. In both,
+ * a backslash makes the character after it literal, so `report\?.txt` names one file.
  */
 export function globToRegExp(
   pattern: string,
@@ -13,7 +14,10 @@ export function globToRegExp(
   let source = "^";
   for (let index = 0; index < pattern.length; index++) {
     const character = pattern[index]!;
-    if (character === "*") {
+    if (character === "\\" && index + 1 < pattern.length) {
+      index++;
+      source += pattern[index]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    } else if (character === "*") {
       const doubled = pattern[index + 1] === "*";
       if (doubled) {
         index++;
