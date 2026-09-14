@@ -3,6 +3,35 @@
 All notable changes to Portrail are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [0.1.3] — 2026-09-14
+
+### Security
+
+- The sed and search checks now judge a program by its name, however it was spelled.
+  `SED -n 1w/tmp/x f`, `RG --hidden KEY`, `Grep -r KEY .` and `/usr/bin/rg --hidden`
+  matched the case-insensitive allow rules but skipped those checks, so on a
+  case-insensitive filesystem they could write a file or read `.env`.
+
+### Added
+
+- `portrail/extension` exports the analysis the built-in decider judges from
+  (`analyseOperation` with its types) plus `parseCommand`, `containOperation`,
+  `parsePattern`, `recursiveReadOf`, `bearerToken`, `isPortrailError`, `AuthGuard` and
+  the `SearchFilter`/`SearchGlob` types, so an extension's decider judges the same facts
+  instead of parsing the command line again.
+- A backslash in a rule makes the character after it literal: `read:report\?.txt`
+  names that one file.
+
+### Fixed
+
+- An error raised by an extension built against its own copy of the core (the
+  `PORTRAIL_EXTENSION` development setup, or a global install beside a global
+  `portrail`) kept becoming a 500. Portrail errors are now recognised by their shape.
+- An installed extension whose own dependency could not be imported was treated as
+  "not installed" and the daemon started on the built-in rules. Only the extension
+  module itself being absent means that now; anything else stops the start with the
+  import error.
+
 ## [0.1.2] — 2026-09-13
 
 ### Security
