@@ -203,6 +203,9 @@ test("portrail/extension exports what an extension needs to judge as the core do
     "globToRegExp",
     "sedObjection",
     "reachableFiles",
+    "bearerToken",
+    "isPortrailError",
+    "AuthGuard",
   ] as const)
     assert.equal(typeof surface[name], "function", `${name} is exported`);
 });

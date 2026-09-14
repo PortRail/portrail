@@ -6,6 +6,7 @@ import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
 import { obj, optNum, optStr, str } from "./body.ts";
 import { AuthGuard } from "./auth-guard.ts";
+import { bearerToken } from "./bearer.ts";
 import type { Extension, ExtensionHost } from "../extension.ts";
 import {
   digest,
@@ -195,9 +196,8 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
     }),
   );
 
-  // The scheme is case-insensitive (RFC 7235); proxies and clients spell it as they like.
   const bearer = (request: FastifyRequest) =>
-    /^bearer\s+(\S+)\s*$/i.exec(request.headers.authorization ?? "")?.[1];
+    bearerToken(request.headers.authorization);
 
   /** Authenticate and check one scope. Attaches the principal to the request. */
   const auth = (request: FastifyRequest, scope: Scope): Principal => {
