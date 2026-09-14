@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
-import { ensure, fail, PortrailError } from "../contracts/errors.ts";
+import { ensure, fail, isPortrailError } from "../contracts/errors.ts";
 import type { Gateway } from "../core/gateway.ts";
 import { Keys, publicKey, type Principal, type Scope } from "../core/keys.ts";
 import type { RunRecord } from "../core/records.ts";
@@ -148,10 +148,10 @@ export async function createApp(options: ServerOptions): Promise<FastifyInstance
   });
 
   app.setErrorHandler((error: any, request, reply) => {
-    if (error instanceof PortrailError) {
+    if (isPortrailError(error)) {
       if (error.status === 401)
         guard.failed(request.ip, error.code, request.method, request.url);
-      if (error.status === 429 && typeof error.details.retryAfterSeconds === "number")
+      if (error.status === 429 && typeof error.details?.retryAfterSeconds === "number")
         reply.header("Retry-After", String(error.details.retryAfterSeconds));
       return reply.code(error.status).send(error.toJSON());
     }

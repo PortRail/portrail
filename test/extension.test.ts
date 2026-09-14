@@ -206,3 +206,72 @@ test("portrail/extension exports what an extension needs to judge as the core do
   ] as const)
     assert.equal(typeof surface[name], "function", `${name} is exported`);
 });
+
+test("an error raised by an extension built against its own copy of the core keeps its status", async () => {
+  const { gateway, store } = testGateway();
+  const foreign = (status: number, code: string) =>
+    Object.assign(new Error(`${code} from another copy`), {
+      name: "PortrailError",
+      status,
+      code,
+      details: {},
+      toJSON() {
+        return {
+          error: { code, message: `${code} from another copy`, retryable: false },
+        };
+      },
+    });
+  const extension: Extension = {
+    name: "other-copy",
+    version: "0",
+    routes: (app) => {
+      app.get("/v1/pro/teapot", async () => {
+        throw foreign(418, "TEAPOT");
+      });
+      app.get("/v1/pro/locked", async () => {
+        throw foreign(401, "UNAUTHORIZED");
+      });
+    },
+  };
+  const keys = new Keys(store);
+  const { token } = keys.create({ name: "t" });
+  const app = await createApp({
+    gateway,
+    store,
+    keys,
+    dataDir: mkdtempSync(join(tmpdir(), "portrail-ext-")),
+    extension,
+    agentStatus: async () => [],
+  });
+  const headers = { authorization: `Bearer ${token}` };
+
+  const teapot = await app.inject({ method: "GET", url: "/v1/pro/teapot", headers });
+  assert.equal(teapot.statusCode, 418);
+  assert.equal(teapot.json().error.code, "TEAPOT");
+
+  // A foreign 401 counts toward the lockout like our own.
+  const original = console.error;
+  console.error = () => {};
+  try {
+    for (let i = 0; i < 10; i++) {
+      const refused = await app.inject({
+        method: "GET",
+        url: "/v1/pro/locked",
+        headers,
+        remoteAddress: "203.0.113.77",
+      });
+      assert.equal(refused.statusCode, 401);
+    }
+    const locked = await app.inject({
+      method: "GET",
+      url: "/v1/runs",
+      headers,
+      remoteAddress: "203.0.113.77",
+    });
+    assert.equal(locked.statusCode, 429);
+    assert.equal(locked.json().error.code, "TOO_MANY_FAILURES");
+  } finally {
+    console.error = original;
+  }
+  await app.close();
+});

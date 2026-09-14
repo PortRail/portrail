@@ -1,6 +1,6 @@
 import { BOOLEAN_FLAGS, parseArgs, flagBool, flagString } from "./args.ts";
 import { COMMAND_HELP, HELP } from "./help.ts";
-import { PortrailError } from "../contracts/errors.ts";
+import { PortrailError, isPortrailError } from "../contracts/errors.ts";
 import { version } from "../runtime.ts";
 
 /** The general help, plus whatever commands an installed extension adds. */
@@ -101,7 +101,7 @@ async function main(): Promise<number> {
 try {
   process.exitCode = await main();
 } catch (error) {
-  if (error instanceof PortrailError) {
+  if (isPortrailError(error)) {
     console.error(`portrail: ${error.message}`);
   } else {
     console.error(`portrail: ${(error as Error).message ?? error}`);
