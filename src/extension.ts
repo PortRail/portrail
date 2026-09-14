@@ -100,6 +100,23 @@ export { globToRegExp } from "./decide/match.ts";
 export { sedObjection } from "./decide/sed.ts";
 export { canonicalPath } from "./core/gateway.ts";
 export { reachableFiles, REACH_LIMIT } from "./core/reach.ts";
+/**
+ * The analysis the built-in decider judges from — segments in every form a rule may
+ * match, named files, what a search opens — so an extension's decider can judge the
+ * same facts instead of parsing the command line again.
+ */
+export {
+  analyseOperation,
+  type OperationAnalysis,
+  type AnalysedSegment,
+  type SearchReach,
+  type AnalysisOptions,
+} from "./decide/analysis.ts";
+export { parseCommand, type CommandSegment } from "./decide/command.ts";
+export { containOperation } from "./core/gateway.ts";
+export { parsePattern, type Pattern } from "./decide/match.ts";
+export { recursiveReadOf, type RecursiveRead } from "./decide/recursive.ts";
+export type { SearchFilter, SearchGlob } from "./types.ts";
 export type { RunRecord, SessionRecord, OperationRecord } from "./core/records.ts";
 export type { KeyRecord, Principal, Scope } from "./core/keys.ts";
 export { Keys } from "./core/keys.ts";

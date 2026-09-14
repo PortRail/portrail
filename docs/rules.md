@@ -13,7 +13,9 @@ The free version decides with three lists in `~/.portrail/config.json`:
 ```
 
 **Deny wins. Allow passes. Ask stops and asks you. Anything unmatched is refused.**
-Matching ignores case for every kind, because the filesystem the commands run on does.
+Matching ignores case for every kind, because the filesystem the commands run on does,
+and so do the sed and search checks: `SED`, `/usr/bin/rg` and `Grep -r` are judged as
+`sed`, `rg` and `grep`.
 
 ## Ask: the third answer
 

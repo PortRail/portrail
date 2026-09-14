@@ -194,6 +194,12 @@ const rows: Row[] = [
 
   // Read-only tools with a write or run switch, and prefix look-alikes.
   deny("sed -n 1w/tmp/x README.md", /print or filter/),
+  // The sed and search checks see the program by its name, however it was spelled.
+  deny("SED -n 1w/tmp/x README.md", /print or filter/),
+  allow("SED -n 1p README.md"),
+  deny("RG --hidden API_KEY", /reaches \.env/),
+  deny("Grep -r API_KEY .", /reaches \.env/),
+  deny("/usr/bin/rg --hidden X confidential", /confidential/, { lists: CUSTOM }),
   deny("sed -n -i s/a/b/ README.md", /print or filter/),
   deny("sed -n 's/a/b/e' README.md", /print or filter/),
   deny("node --test evil.js", /No allow rule/),
