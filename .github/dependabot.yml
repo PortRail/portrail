@@ -1,7 +1,23 @@
-# Keeps the SHA-pinned actions in .github/workflows current.
+# Keeps the SHA-pinned actions in .github/workflows and the lockfile current.
+# Updates of one ecosystem arrive as one pull request, so bumps to adjacent
+# lines do not collide.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      production:
+        dependency-type: production
+        patterns: ["*"]
+      development:
+        dependency-type: development
+        patterns: ["*"]
