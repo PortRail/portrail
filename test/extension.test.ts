@@ -191,3 +191,18 @@ test("--relay without Pro is refused with a reason, not silently ignored", async
     /Unknown option --frobnicate/,
   );
 });
+
+test("portrail/extension exports what an extension needs to judge as the core does", async () => {
+  const surface = await import("../src/extension.ts");
+  for (const name of [
+    "analyseOperation",
+    "parseCommand",
+    "containOperation",
+    "parsePattern",
+    "recursiveReadOf",
+    "globToRegExp",
+    "sedObjection",
+    "reachableFiles",
+  ] as const)
+    assert.equal(typeof surface[name], "function", `${name} is exported`);
+});
