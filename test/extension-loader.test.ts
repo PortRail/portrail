@@ -54,3 +54,39 @@ test("the daemon does not assemble with a broken configured extension", () =>
       /bad build/,
     );
   }));
+
+/** Run with PORTRAIL_EXTENSION unset, so the loader takes the discovery path. */
+async function discovering(fn: () => Promise<void>) {
+  const previous = process.env.PORTRAIL_EXTENSION;
+  delete process.env.PORTRAIL_EXTENSION;
+  try {
+    await fn();
+  } finally {
+    if (previous !== undefined) process.env.PORTRAIL_EXTENSION = previous;
+  }
+}
+
+test("an installed extension whose own dependency is missing is a broken extension, not an absent one", () =>
+  discovering(async () => {
+    const dir = mkdtempSync(join(tmpdir(), "portrail-loader-"));
+    const file = join(dir, "ext.mjs");
+    writeFileSync(
+      file,
+      `import "no-such-package-portrail-test";\nexport default { name: "x", version: "1" };`,
+    );
+    const { pathToFileURL } = await import("node:url");
+    await assert.rejects(
+      loadExtension(pathToFileURL(file).href),
+      /installed but failed to load.*no-such-package-portrail-test/,
+    );
+  }));
+
+test("only the extension module itself being absent counts as not installed", () =>
+  discovering(async () => {
+    const { pathToFileURL } = await import("node:url");
+    const missing = join(mkdtempSync(join(tmpdir(), "portrail-loader-")), "gone.mjs");
+    assert.deepEqual(await loadExtension(pathToFileURL(missing).href), {
+      extension: null,
+      detail: "not installed",
+    });
+  }));

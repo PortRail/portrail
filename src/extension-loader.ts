@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { EXTENSION_MODULE, type Extension } from "./extension.ts";
 
 export interface LoadResult {
@@ -17,17 +17,18 @@ export interface LoadResult {
  * The specifier goes through a variable on purpose: the free core must compile and
  * ship without the proprietary package present, so it cannot be a static import.
  */
-export async function loadExtension(): Promise<LoadResult> {
+export async function loadExtension(module_ = EXTENSION_MODULE): Promise<LoadResult> {
   const configured = process.env.PORTRAIL_EXTENSION;
   const specifier: string = configured
     ? pathToFileURL(resolve(configured)).href
-    : EXTENSION_MODULE;
+    : module_;
   let module: unknown;
   try {
     module = await import(specifier);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    const notFound = code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND";
+    // Only the extension module itself being absent means "not installed". A
+    // package the extension imports being absent means it is installed and broken.
+    const notFound = isNotFound(error, specifier);
     if (notFound && !configured) return { extension: null, detail: "not installed" };
     const message = (error as Error).message ?? String(error);
     throw new Error(
@@ -53,4 +54,14 @@ export async function loadExtension(): Promise<LoadResult> {
 
   const extension = candidate as Extension;
   return { extension, detail: `${extension.name} ${extension.version}` };
+}
+
+function isNotFound(error: unknown, specifier: string): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code !== "ERR_MODULE_NOT_FOUND" && code !== "MODULE_NOT_FOUND") return false;
+  const message = (error as Error).message ?? "";
+  // Node names what it could not find: `Cannot find package 'x' imported from …` or
+  // `Cannot find module '/path' imported from …`.
+  const name = specifier.startsWith("file:") ? fileURLToPath(specifier) : specifier;
+  return message.includes(`'${name}'`);
 }
