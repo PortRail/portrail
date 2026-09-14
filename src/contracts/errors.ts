@@ -23,6 +23,22 @@ export class PortrailError extends Error {
   }
 }
 
+/**
+ * Whether `error` is a Portrail error — ours, or one from an extension built against
+ * its own copy of the core, which `instanceof` would not recognise. A Portrail error
+ * is known by its shape: the name, a numeric status, a string code and a wire form.
+ */
+export function isPortrailError(error: unknown): error is PortrailError {
+  if (error instanceof PortrailError) return true;
+  if (!(error instanceof Error) || error.name !== "PortrailError") return false;
+  const shaped = error as Partial<PortrailError>;
+  return (
+    typeof shaped.status === "number" &&
+    typeof shaped.code === "string" &&
+    typeof shaped.toJSON === "function"
+  );
+}
+
 export function ensure(
   condition: unknown,
   status: number,

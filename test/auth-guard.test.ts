@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AuthGuard } from "../src/server/auth-guard.ts";
+import { bearerToken } from "../src/server/bearer.ts";
 
 function guard(overrides: { limit?: number; windowMs?: number } = {}) {
   let now = 1_000_000;
@@ -79,4 +80,15 @@ test("old addresses are forgotten so the table cannot grow without bound", () =>
   advance(61_000);
   g.failed("203.0.113.9", "UNAUTHORIZED", "GET", "/");
   assert.ok(g.size <= 2, `expired addresses were swept, ${g.size} remain`);
+});
+
+test("bearerToken reads the scheme in any case and refuses anything else", () => {
+  assert.equal(bearerToken("Bearer x"), "x");
+  assert.equal(bearerToken("bearer x"), "x");
+  assert.equal(bearerToken("BEARER  x "), "x");
+  assert.equal(bearerToken("Basic x"), undefined);
+  assert.equal(bearerToken("Bearer"), undefined);
+  assert.equal(bearerToken("Bearer a b"), undefined);
+  assert.equal(bearerToken(""), undefined);
+  assert.equal(bearerToken(undefined), undefined);
 });

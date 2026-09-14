@@ -136,7 +136,8 @@ the root.
 Commands use a simpler glob where `*` matches anything, including the rest of a word:
 `exec:git commit *` matches `git commit -m "fix"`, and `exec:npm test*` would also match
 `npm testx`. Write `exec:npm test` and `exec:npm test *` to mean the command with and
-without arguments. All matching ignores case.
+without arguments. All matching ignores case. In both dialects a backslash makes the
+character after it literal: `read:report\?.txt` names that one file.
 
 ## The defaults
 

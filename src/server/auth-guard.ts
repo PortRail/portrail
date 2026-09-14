@@ -6,6 +6,16 @@
  * the key material. Requests refused while locked are not counted, so hammering cannot
  * extend a lockout.
  */
+export interface AuthGuardOptions {
+  /** Failures within the window before an address is locked out. Default 10. */
+  limit?: number;
+  /** The rolling window, and the lockout that follows it. Default 60 s. */
+  windowMs?: number;
+  now?: () => number;
+  /** Receives one line per failure and one per lockout; never a token. */
+  log?: (line: string) => void;
+}
+
 export class AuthGuard {
   private readonly failures = new Map<string, number[]>();
   private readonly limit: number;
@@ -14,14 +24,7 @@ export class AuthGuard {
   private readonly log: (line: string) => void;
   private lastSweep: number;
 
-  constructor(
-    options: {
-      limit?: number;
-      windowMs?: number;
-      now?: () => number;
-      log?: (line: string) => void;
-    } = {},
-  ) {
+  constructor(options: AuthGuardOptions = {}) {
     this.limit = options.limit ?? 10;
     this.windowMs = options.windowMs ?? 60_000;
     this.now = options.now ?? (() => Date.now());

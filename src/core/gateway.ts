@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { ensure, fail, PortrailError } from "../contracts/errors.ts";
+import { ensure, fail, isPortrailError } from "../contracts/errors.ts";
 import type { Decider, DecisionContext } from "../extension.ts";
 import type { Provider, ProviderEvent, ProviderHandle } from "../providers/types.ts";
 import { Store, id as newId, now, type PortrailEvent } from "../store/index.ts";
@@ -175,7 +175,7 @@ export class Gateway extends EventEmitter {
         "Choose a directory.",
       );
     } catch (error) {
-      if (error instanceof PortrailError) throw error;
+      if (isPortrailError(error)) throw error;
       fail(400, "INVALID_REQUEST", `Workspace directory does not exist: ${input.root}`);
     }
     const refused = refuseWorkspaceRoot(canonical, this.options.dataDir);
