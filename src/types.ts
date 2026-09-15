@@ -98,11 +98,7 @@ export interface ToolOperation extends OperationBase {
 }
 
 export type Operation =
-  | ExecOperation
-  | WriteOperation
-  | ReadOperation
-  | NetOperation
-  | ToolOperation;
+  ExecOperation | WriteOperation | ReadOperation | NetOperation | ToolOperation;
 
 export type Verdict = "allow" | "deny" | "ask";
 

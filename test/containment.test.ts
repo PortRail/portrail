@@ -80,10 +80,8 @@ test("a dangling symlink pointing outside the workspace is refused, and a symlin
       };
       const contained = containOperation(read, root.toUpperCase());
       assert.equal(contained.refused, null);
-      assert.ok(
-        (contained.operation as ReadOperation).paths[0]!.endsWith("/Sub/File.txt"),
-        (contained.operation as ReadOperation).paths[0],
-      );
+      const spelled = (contained.operation as ReadOperation).paths[0]!;
+      assert.ok(spelled.endsWith("/Sub/File.txt"), spelled);
       assert.equal(contained.root, realpathSync.native(root));
     },
   );
