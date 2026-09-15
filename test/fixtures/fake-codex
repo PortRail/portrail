@@ -14,6 +14,10 @@ const log = (entry) => appendFileSync(join(dataDir, "fake-log.jsonl"), JSON.stri
 const write = (message) => process.stdout.write(JSON.stringify(message) + "\n");
 
 log({ argv: process.argv.slice(2), env: Object.keys(process.env).sort() });
+if (scenario.rejectPublicUntrusted && /approval_policy\s*=\s*"untrusted"/.test(readFileSync(join(home, "config.toml"), "utf8"))) {
+  console.error('approval_policy = "untrusted" is no longer supported; remove this setting');
+  process.exit(1);
+}
 
 let nextServerId = 100;
 const waiting = new Map(); // server request id → continue()
@@ -64,7 +68,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return write({ id, result: { account: { type: "chatgpt" } } });
     case "thread/start":
     case "thread/resume":
-      return write({ id, result: { thread: { id: "thr_fake" } } });
+      return write({ id, result: { thread: { id: "thr_fake" }, approvalPolicy: scenario.effectiveApprovalPolicy ?? params.approvalPolicy, approvalsReviewer: scenario.effectiveReviewer ?? params.approvalsReviewer } });
     case "mcpServerStatus/list":
       if (scenario.mcpListFails) return write({ id, error: { code: -32603, message: "mcp inventory unavailable" } });
       return write({ id, result: { data: scenario.mcpServers ?? [] } });

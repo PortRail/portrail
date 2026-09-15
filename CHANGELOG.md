@@ -3,6 +3,17 @@
 All notable changes to Portrail are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [Unreleased]
+
+### Fixed
+
+- Codex 0.149+ rejects `approval_policy = "untrusted"` in its public configuration.
+  The managed home now leaves that setting out, while every app-server thread start
+  and resume still explicitly requests `untrusted` with the `user` reviewer. Portrail
+  verifies the effective response before starting a turn and refuses to run if either
+  value changed. Existing managed homes update automatically; prompt rules remain.
+  Validated with Codex CLI 0.153.4, including denied reads and Pro approvals.
+
 ## [0.1.3] — 2026-09-14
 
 ### Security

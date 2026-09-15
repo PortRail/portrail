@@ -65,10 +65,13 @@ const AUTO_TRUSTED_COMMANDS = [
 
 const MANAGED_MARKER = "# Managed by Portrail.";
 
-/** Minimal config: nothing personal leaks in, and every knob Portrail cares about is set per thread. */
+/**
+ * Bootstrap without approval_policy: Codex 0.149+ rejects "untrusted" in public
+ * config, but still supports it in the app-server thread binding. That binding is
+ * set and verified before every turn; bootstrapping never starts a model turn.
+ */
 const CONFIG_TOML = `${MANAGED_MARKER} Edit ~/.codex/config.toml for your own Codex sessions, not this file.
 sandbox_mode = "workspace-write"
-approval_policy = "untrusted"
 `;
 
 function rulesFile(): string {
