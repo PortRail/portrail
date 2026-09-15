@@ -687,6 +687,10 @@ export async function prune(args: ParsedArgs): Promise<number> {
     );
   if (requested !== undefined && requested < 0)
     throw new Error("--days must be 0 or more; 0 removes everything that is finished.");
+  if (requested === 0 && !flagBool(args, "yes"))
+    throw new Error(
+      "--days 0 removes every finished session with its runs, operations and events, and an installed extension removes its own records with the same cutoff: for Portrail Pro, its whole audit log. Add --yes to do it.",
+    );
   const ctx = offline(flagString(args, "home"));
   try {
     const days = requested ?? ctx.config.retentionDays;
@@ -707,7 +711,9 @@ export async function prune(args: ParsedArgs): Promise<number> {
       json,
       { days, ...removed },
       () =>
-        `Removed ${plural(removed.sessions, "session")} older than ${plural(days, "day")} ` +
+        (days === 0
+          ? `Removed every finished session: ${plural(removed.sessions, "session")} `
+          : `Removed ${plural(removed.sessions, "session")} older than ${plural(days, "day")} `) +
         `(${plural(removed.runs, "run")}, ${plural(removed.operations, "operation")}, ` +
         `${plural(removed.events, "event")}, ${plural(removed.commands, "command")} record${removed.commands === 1 ? "" : "s"}).` +
         (extension ? ` ${extension.name} pruned its own records too.` : ""),
