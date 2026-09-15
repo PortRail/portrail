@@ -68,9 +68,10 @@ Before any rule runs, every path — declared, or named as a command argument �
 canonicalised (symlinks followed, on-disk spelling) and must be inside the workspace;
 `~/.ssh`, credential stores, shell history, the agent config directories and Portrail's
 own data directory are refused everywhere. So are the workspace's own git credentials:
-naming `.git/config`, `.git/credentials` or `.git-credentials` is refused, and a search
-that would open one is refused when the file really carries a token — a remote URL with a
-password in it, or a stored password. An ordinary repository's config refuses nothing, and
+naming `.git/config`, `.git/credentials`, `.git-credentials` or a submodule's config under
+`.git/modules` is refused, and a search that would open one is refused when the file really
+carries a credential — a token or password in a remote URL, the auth header a CI checkout
+leaves behind, or a stored password. An ordinary repository's config refuses nothing, and
 `git` itself runs as before. No rule can override any of that.
 
 `node_modules` is deliberately left out of a search's judgement: walking it would cost more

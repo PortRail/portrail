@@ -1,5 +1,5 @@
 import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { canonicalPath, isWithin } from "./paths.ts";
 
 function real(path: string): string {
@@ -14,10 +14,11 @@ function real(path: string): string {
 export const REACH_LIMIT = 20_000;
 
 /**
- * Stores under `.git` that hold compressed objects: a text search never matches
- * inside them, and they are large enough to make a judgement slow.
+ * Stores under a `.git` directory, a submodule's included, that hold packed or large
+ * objects: a text search never matches inside them, and walking them makes a judgement
+ * slow. A submodule's own config under `.git/modules` is walked.
  */
-const GIT_OBJECT_STORES = new Set(["objects", "lfs", "modules"]);
+const GIT_OBJECT_STORES = new Set(["objects", "lfs"]);
 
 export interface Reach {
   /** Every regular file the search can read, as canonical paths. */
@@ -53,7 +54,7 @@ export function reachableFiles(
   const skipDependencies = options.skipDependencies ?? true;
   const skipped = (parent: string, name: string) =>
     (skipDependencies && name === "node_modules") ||
-    (GIT_OBJECT_STORES.has(name) && basename(parent) === ".git");
+    (GIT_OBJECT_STORES.has(name) && parent.split(sep).includes(".git"));
   const root = real(declaredRoot);
   const start = real(dir);
   const files: string[] = [];

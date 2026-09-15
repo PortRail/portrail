@@ -77,15 +77,33 @@ export const SANDBOX_DENY_GLOBS: readonly string[] = [
  * `git status` from running at all. What is protected is the file, not the command.
  */
 export function isWorkspaceSecret(relativePath: string): boolean {
-  const parts = relativePath.split("/").filter(Boolean);
-  const name = parts.at(-1)?.toLowerCase();
+  const parts = relativePath
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .map((part) => part.toLowerCase());
+  const name = parts.at(-1);
   if (!name) return false;
   if (name === ".git-credentials") return true;
-  return (
-    (name === "config" || name === "credentials") &&
-    parts.at(-2)?.toLowerCase() === ".git"
-  );
+  const git = parts.lastIndexOf(".git");
+  if (git === -1 || git === parts.length - 1) return false;
+  const inside = parts.slice(git + 1, -1);
+  // .git/config and .git/credentials, and a submodule's config under .git/modules/<name>/.
+  if (inside.length === 0) return name === "config" || name === "credentials";
+  return name === "config" && inside[0] === "modules" && inside.length >= 2;
 }
+
+/**
+ * How a credential sits in a git config: in the user part of a web URL, as a header git
+ * sends with every request, or as a stored password. An ssh user is not a secret.
+ */
+const CREDENTIAL_FORMS: readonly RegExp[] = [
+  // https://user:token@host and https://token@host, in a remote or a rewrite rule.
+  /\b(?:https?|ftps?):\/\/[^\s/@"]+@/i,
+  // http.extraheader = AUTHORIZATION: basic …, as CI checkouts persist it.
+  /^\s*extraheader\s*=\s*\S/im,
+  // A password stored in a credential section.
+  /^\s*password\s*=/im,
+];
 
 /**
  * Whether a file a search would open really holds a credential.
@@ -117,6 +135,5 @@ export function holdsGitCredentials(
     // Unreadable is not a reason to let a search through.
     return true;
   }
-  // `url = https://user:token@host`, or a password stored in a credential section.
-  return /:\/\/[^\s/@]+:[^\s/@]*@/.test(text) || /^\s*password\s*=/im.test(text);
+  return CREDENTIAL_FORMS.some((form) => form.test(text));
 }

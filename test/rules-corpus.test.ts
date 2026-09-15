@@ -82,6 +82,8 @@ type Row = {
   cwd?: string;
   /** A workspace of its own, for the cases that need a repository or a dependency tree. */
   root?: string;
+  /** Named in the test title when the row runs in a workspace of its own. */
+  where?: string;
 };
 const allow = (command: string, extra: Partial<Row> = {}): Row => ({
   command,
@@ -120,6 +122,33 @@ const deps = mkdtempSync(join(tmpdir(), "portrail-corpus-deps-"));
 mkdirSync(join(deps, "node_modules", "pkg"), { recursive: true });
 writeFileSync(join(deps, "node_modules", "pkg", ".env"), "API_KEY=synthetic");
 writeFileSync(join(deps, "a.ts"), "");
+
+// The other forms a credential takes in a git config, and a remote user that is not one.
+function gitRepo(files: Record<string, string>) {
+  const root = mkdtempSync(join(tmpdir(), "portrail-corpus-git-"));
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(join(root, path, ".."), { recursive: true });
+    writeFileSync(join(root, path), content);
+  }
+  writeFileSync(join(root, "a.ts"), "");
+  return root;
+}
+const tokenUser = gitRepo({
+  ".git/config":
+    '[remote "origin"]\n\turl = https://ghp_SYNTHETIC@github.com/o/r.git\n',
+});
+const ciHeader = gitRepo({
+  ".git/config":
+    '[http "https://github.com/"]\n\textraheader = AUTHORIZATION: basic U1lOVEhFVElD\n',
+});
+const submodule = gitRepo({
+  ".git/config": "[core]\n\tbare = false\n",
+  ".git/modules/lib/config":
+    '[remote "origin"]\n\turl = https://user:synthetic@example.test/lib.git\n',
+});
+const sshRemote = gitRepo({
+  ".git/config": '[remote "origin"]\n\turl = ssh://git@example.test/x/y.git\n',
+});
 
 const rows: Row[] = [
   // What Codex and Claude compose every day must keep working.
@@ -258,25 +287,78 @@ const rows: Row[] = [
   deny("./bin/git status", /No allow rule/),
 
   // A workspace's own git credentials, and the searches that would open them.
-  deny("cat .git/config", /protected in every workspace/, { cwd: repo, root: repo }),
-  deny("rg --hidden synthetic .", /\.git\/config/, { cwd: repo, root: repo }),
-  deny("grep -r synthetic .", /\.git\/config/, { cwd: repo, root: repo }),
-  allow("rg synthetic .", { cwd: repo, root: repo }),
-  allow("git status --short", { cwd: repo, root: repo }),
+  deny("cat .git/config", /protected in every workspace/, {
+    cwd: repo,
+    root: repo,
+    where: "repository with a token",
+  }),
+  deny("rg --hidden synthetic .", /\.git\/config/, {
+    cwd: repo,
+    root: repo,
+    where: "repository with a token",
+  }),
+  deny("grep -r synthetic .", /\.git\/config/, {
+    cwd: repo,
+    root: repo,
+    where: "repository with a token",
+  }),
+  allow("rg synthetic .", { cwd: repo, root: repo, where: "repository with a token" }),
+  allow("git status --short", {
+    cwd: repo,
+    root: repo,
+    where: "repository with a token",
+  }),
 
   // A repository without a stored credential is searched as before: no false refusals.
-  allow("rg --hidden synthetic .", { cwd: plain, root: plain }),
-  allow("grep -r synthetic .", { cwd: plain, root: plain }),
+  allow("rg --hidden synthetic .", {
+    cwd: plain,
+    root: plain,
+    where: "repository without one",
+  }),
+  allow("grep -r synthetic .", {
+    cwd: plain,
+    root: plain,
+    where: "repository without one",
+  }),
 
   // The dependency tree is left out of a judgement, so a search over it is not refused
   // by what a package ships — but naming the file still is.
-  allow("grep -r API_KEY .", { cwd: deps, root: deps }),
-  deny("cat node_modules/pkg/.env", /deny list/, { cwd: deps, root: deps }),
+  allow("grep -r API_KEY .", { cwd: deps, root: deps, where: "dependency tree" }),
+  deny("cat node_modules/pkg/.env", /deny list/, {
+    cwd: deps,
+    root: deps,
+    where: "dependency tree",
+  }),
+  deny("rg --hidden synthetic .", /\.git\/config/, {
+    cwd: tokenUser,
+    root: tokenUser,
+    where: "token as the URL user",
+  }),
+  deny("rg --hidden synthetic .", /\.git\/config/, {
+    cwd: ciHeader,
+    root: ciHeader,
+    where: "auth header from a CI checkout",
+  }),
+  deny("rg --hidden synthetic .", /\.git\/modules\/lib\/config/, {
+    cwd: submodule,
+    root: submodule,
+    where: "token in a submodule",
+  }),
+  deny("cat .git/modules/lib/config", /protected in every workspace/, {
+    cwd: submodule,
+    root: submodule,
+    where: "token in a submodule",
+  }),
+  allow("rg --hidden synthetic .", {
+    cwd: sshRemote,
+    root: sshRemote,
+    where: "ssh remote",
+  }),
   deny("/usr/bin/env node --version", /No allow rule/),
 ];
 
 for (const row of rows)
-  test(`${row.expected}: ${row.command}${row.lists ? " (custom lists)" : ""}${row.cwd ? " (from sub/)" : ""}`, async () => {
+  test(`${row.expected}: ${row.command}${row.lists ? " (custom lists)" : ""}${row.where ? ` (${row.where})` : row.cwd ? " (from sub/)" : ""}`, async () => {
     const got = await judge(row.command, row.lists, row.cwd, row.root);
     assert.equal(got.verdict, row.expected, `${got.by}: ${got.reason}`);
     if (row.reason) assert.match(got.reason, row.reason);
