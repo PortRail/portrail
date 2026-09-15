@@ -1002,8 +1002,13 @@ export class Gateway extends EventEmitter {
         this.store.remove("session", session.id);
         removed.sessions += 1;
       }
+      // A retry record holds only a run id. Keep the last day of them whatever the window,
+      // so a client retrying right after a prune is not handed a second run.
+      const retries = new Date(
+        Math.min(Date.parse(cutoff), Date.now() - 86_400_000),
+      ).toISOString();
       removed.commands = Number(
-        this.store.db.prepare("DELETE FROM commands WHERE created_at<?").run(cutoff)
+        this.store.db.prepare("DELETE FROM commands WHERE created_at<?").run(retries)
           .changes,
       );
     });

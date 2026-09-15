@@ -73,10 +73,41 @@ test("portrail prune says what it removed in plain text and honours --days", asy
   assert.match(pruned.text, /1 run\b.*1 operation\b.*2 events.*1 command\b/s);
 });
 
-test("portrail prune refuses a window under one day", async () => {
+test("portrail prune takes 0 to mean everything finished, and still refuses a fraction", async () => {
   const h = seededHome();
-  await assert.rejects(captured(["--home", h, "--days", "0"]), /at least 1/);
+  // A session from an hour ago: inside every window a day or wider, but before now.
+  const store = new Store(databasePath(dataDirectory(h)));
+  seedSession(
+    store,
+    "recent",
+    new Date(Date.now() - 3_600_000).toISOString(),
+    "succeeded",
+  );
+  store.close();
+
+  const window = await captured(["--home", h, "--json", "--days", "30"]);
+  assert.equal(
+    JSON.parse(window.text).sessions,
+    1,
+    "the old session goes, the one from an hour ago stays",
+  );
+
+  await assert.rejects(
+    captured(["--home", h, "--days", "0"]),
+    /--yes/,
+    "everything is one confirmation away, not one keystroke",
+  );
+  const retry = seedRetry(h, new Date(Date.now() - 3_600_000).toISOString());
+  const everything = await captured(["--home", h, "--json", "--days", "0", "--yes"]);
+  assert.equal(JSON.parse(everything.text).sessions, 1, "0 takes what is left");
+  assert.equal(
+    retryRecords(h, retry),
+    1,
+    "a retry record from an hour ago stays, so a client retrying now is not handed a second run",
+  );
+
   await assert.rejects(captured(["--home", h, "--days", "1.5"]), /whole number/);
+  await assert.rejects(captured(["--home", h, "--days=-1"]), /0 or more/);
 });
 
 test("portrail prune gives the loaded extension the same cutoff", async () => {
@@ -104,3 +135,42 @@ test("portrail prune gives the loaded extension the same cutoff", async () => {
     else process.env.PORTRAIL_EXTENSION = previous;
   }
 });
+
+function withStore<T>(home: string, work: (store: Store) => T): T {
+  const store = new Store(databasePath(dataDirectory(home)));
+  try {
+    return work(store);
+  } finally {
+    store.close();
+  }
+}
+
+/** An Idempotency-Key record as the API writes one: the run id and nothing else. */
+function seedRetry(home: string, createdAt: string): string {
+  const key = `retry-${Date.parse(createdAt)}`;
+  withStore(home, (store) =>
+    store.db
+      .prepare("INSERT INTO commands VALUES(?,?,?,?,?,?)")
+      .run(
+        "key_test",
+        "POST /v1/runs",
+        key,
+        "digest",
+        JSON.stringify({ id: "run_x" }),
+        createdAt,
+      ),
+  );
+  return key;
+}
+
+function retryRecords(home: string, key: string): number {
+  return withStore(home, (store) =>
+    Number(
+      (
+        store.db.prepare("SELECT COUNT(*) AS n FROM commands WHERE key=?").get(key) as {
+          n: number;
+        }
+      ).n,
+    ),
+  );
+}
