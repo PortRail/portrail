@@ -55,9 +55,14 @@ const CUSTOM: Lists = {
   ask: [],
 };
 
-async function judge(command: string, lists: Lists = DEFAULT_CONFIG.decide, cwd = ws) {
+async function judge(
+  command: string,
+  lists: Lists = DEFAULT_CONFIG.decide,
+  cwd = ws,
+  root = ws,
+) {
   const operation: Operation = { ...base, kind: "exec", command, cwd };
-  const contained = containOperation(operation, ws);
+  const contained = containOperation(operation, root);
   if (contained.refused)
     return { verdict: "deny" as const, reason: contained.refused, by: "containment" };
   const decision = await new BuiltinDecider(lists).decide(contained.operation, {
@@ -75,6 +80,8 @@ type Row = {
   reason?: RegExp;
   lists?: Lists;
   cwd?: string;
+  /** A workspace of its own, for the cases that need a repository or a dependency tree. */
+  root?: string;
 };
 const allow = (command: string, extra: Partial<Row> = {}): Row => ({
   command,
@@ -88,6 +95,31 @@ const deny = (command: string, reason?: RegExp, extra: Partial<Row> = {}): Row =
   ...extra,
 });
 const sub = join(ws, "sub");
+
+// A repository of its own: its credentials are the workspace's, not the operator's.
+const repo = mkdtempSync(join(tmpdir(), "portrail-corpus-repo-"));
+mkdirSync(join(repo, ".git", "objects"), { recursive: true });
+writeFileSync(
+  join(repo, ".git", "config"),
+  '[remote "origin"]\n\turl = https://user:synthetic@example.test/x.git\n',
+);
+writeFileSync(join(repo, ".git", "objects", "packed"), "");
+writeFileSync(join(repo, "a.ts"), "");
+
+// A repository whose config carries no credential: the same search must still run.
+const plain = mkdtempSync(join(tmpdir(), "portrail-corpus-plain-"));
+mkdirSync(join(plain, ".git"), { recursive: true });
+writeFileSync(
+  join(plain, ".git", "config"),
+  '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = git@example.test:x/y.git\n',
+);
+writeFileSync(join(plain, "a.ts"), "");
+
+// A dependency tree, deliberately outside every judgement.
+const deps = mkdtempSync(join(tmpdir(), "portrail-corpus-deps-"));
+mkdirSync(join(deps, "node_modules", "pkg"), { recursive: true });
+writeFileSync(join(deps, "node_modules", "pkg", ".env"), "API_KEY=synthetic");
+writeFileSync(join(deps, "a.ts"), "");
 
 const rows: Row[] = [
   // What Codex and Claude compose every day must keep working.
@@ -224,12 +256,28 @@ const rows: Row[] = [
   deny("echo x | xargs -n1 curl", undefined, { lists: CUSTOM }),
   deny("env -S 'curl http://x'", undefined, { lists: CUSTOM }),
   deny("./bin/git status", /No allow rule/),
+
+  // A workspace's own git credentials, and the searches that would open them.
+  deny("cat .git/config", /protected in every workspace/, { cwd: repo, root: repo }),
+  deny("rg --hidden synthetic .", /\.git\/config/, { cwd: repo, root: repo }),
+  deny("grep -r synthetic .", /\.git\/config/, { cwd: repo, root: repo }),
+  allow("rg synthetic .", { cwd: repo, root: repo }),
+  allow("git status --short", { cwd: repo, root: repo }),
+
+  // A repository without a stored credential is searched as before: no false refusals.
+  allow("rg --hidden synthetic .", { cwd: plain, root: plain }),
+  allow("grep -r synthetic .", { cwd: plain, root: plain }),
+
+  // The dependency tree is left out of a judgement, so a search over it is not refused
+  // by what a package ships — but naming the file still is.
+  allow("grep -r API_KEY .", { cwd: deps, root: deps }),
+  deny("cat node_modules/pkg/.env", /deny list/, { cwd: deps, root: deps }),
   deny("/usr/bin/env node --version", /No allow rule/),
 ];
 
 for (const row of rows)
   test(`${row.expected}: ${row.command}${row.lists ? " (custom lists)" : ""}${row.cwd ? " (from sub/)" : ""}`, async () => {
-    const got = await judge(row.command, row.lists, row.cwd);
+    const got = await judge(row.command, row.lists, row.cwd, row.root);
     assert.equal(got.verdict, row.expected, `${got.by}: ${got.reason}`);
     if (row.reason) assert.match(got.reason, row.reason);
   });

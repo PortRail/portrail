@@ -1,3 +1,5 @@
+import { closeSync, openSync, readSync } from "node:fs";
+
 /**
  * Places no agent may ever touch, whatever workspace it is in: credential stores,
  * the logins of other tools, the agents' own configuration, shell rc files and
@@ -64,3 +66,57 @@ export const SANDBOX_DENY_GLOBS: readonly string[] = [
   "**/id_ed25519*",
   ...PROTECTED_HOME_ENTRIES.map((entry) => `**/${entry.path}${entry.dir ? "/**" : ""}`),
 ];
+
+/**
+ * Files inside a workspace that hold the workspace's own credentials: a git remote
+ * URL routinely carries a token, and git's credential store is plain text. They are
+ * refused everywhere, for reading as well as writing, whatever the rules say.
+ *
+ * Deliberately not a `decide.deny` rule: the agents' OS sandboxes take those globs
+ * verbatim, and git reads `.git/config` on every invocation, so a rule would stop
+ * `git status` from running at all. What is protected is the file, not the command.
+ */
+export function isWorkspaceSecret(relativePath: string): boolean {
+  const parts = relativePath.split("/").filter(Boolean);
+  const name = parts.at(-1)?.toLowerCase();
+  if (!name) return false;
+  if (name === ".git-credentials") return true;
+  return (
+    (name === "config" || name === "credentials") &&
+    parts.at(-2)?.toLowerCase() === ".git"
+  );
+}
+
+/**
+ * Whether a file a search would open really holds a credential.
+ *
+ * `.git/credentials` and `.git-credentials` exist for nothing else. `.git/config` is in
+ * every repository and is usually dull, so it is read — a few kilobytes, once, only when
+ * a search would open it — and refuses the search only when it carries a token in a
+ * remote URL or a stored password. Refusing every repository's config would refuse
+ * `rg --hidden x .` everywhere and buy nothing.
+ */
+export function holdsGitCredentials(
+  absolutePath: string,
+  relativePath: string,
+): boolean {
+  if (!isWorkspaceSecret(relativePath)) return false;
+  const name = relativePath.split("/").at(-1)?.toLowerCase();
+  if (name !== "config") return true;
+  let text: string;
+  try {
+    const handle = openSync(absolutePath, "r");
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const read = readSync(handle, buffer, 0, buffer.length, 0);
+      text = buffer.subarray(0, read).toString("utf8");
+    } finally {
+      closeSync(handle);
+    }
+  } catch {
+    // Unreadable is not a reason to let a search through.
+    return true;
+  }
+  // `url = https://user:token@host`, or a password stored in a credential section.
+  return /:\/\/[^\s/@]+:[^\s/@]*@/.test(text) || /^\s*password\s*=/im.test(text);
+}

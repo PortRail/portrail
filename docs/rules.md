@@ -67,7 +67,15 @@ Slack or email, the API from another machine), as someone else, with `run` / `se
 Before any rule runs, every path — declared, or named as a command argument — is
 canonicalised (symlinks followed, on-disk spelling) and must be inside the workspace;
 `~/.ssh`, credential stores, shell history, the agent config directories and Portrail's
-own data directory are refused everywhere. No rule can override that.
+own data directory are refused everywhere. So are the workspace's own git credentials:
+naming `.git/config`, `.git/credentials` or `.git-credentials` is refused, and a search
+that would open one is refused when the file really carries a token — a remote URL with a
+password in it, or a stored password. An ordinary repository's config refuses nothing, and
+`git` itself runs as before. No rule can override any of that.
+
+`node_modules` is deliberately left out of a search's judgement: walking it would cost more
+than the limit allows. A search may therefore read what a dependency ships without that
+being judged; naming such a file is still refused by the rules.
 
 ## How commands are judged
 

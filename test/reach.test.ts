@@ -21,6 +21,7 @@ function fixture() {
   for (const file of [
     ".env",
     ".envrc",
+    ".git/config",
     "src/a.ts",
     "confidential/plan.txt",
     "node_modules/pkg/server.pem",
@@ -39,7 +40,7 @@ function fixture() {
 const names = (files: string[], ws: string) =>
   files.map((f) => f.slice(ws.length + 1)).sort();
 
-test("a walk lists what a search can reach: hidden files only when asked, never node_modules or .git", () => {
+test("a walk lists what a search can reach: hidden files only when asked, object stores never", () => {
   const { ws } = fixture();
   const visible = reachableFiles(ws, ws, { hidden: false, follow: false });
   assert.deepEqual(names(visible.files, ws), [
@@ -54,15 +55,35 @@ test("a walk lists what a search can reach: hidden files only when asked, never 
   assert.deepEqual(names(hidden.files, ws), [
     ".env",
     ".envrc",
+    ".git/config",
     "README.md",
     "confidential/plan.txt",
     "src/a.ts",
     "sub/y.txt",
   ]);
   assert.ok(
-    !hidden.files.some((f) => f.includes("node_modules") || f.includes("/.git/")),
-    "dependency and history trees are skipped",
+    !hidden.files.some((f) => f.includes("node_modules")),
+    "the dependency tree stays out of a judgement by default",
   );
+  assert.ok(
+    !hidden.files.some((f) => f.includes("/.git/objects/")),
+    "the object store is compressed; a text search never matches inside it",
+  );
+});
+
+test("the dependency tree is walked only when the caller asks, object stores never", () => {
+  const { ws } = fixture();
+  const all = reachableFiles(ws, ws, {
+    hidden: true,
+    follow: false,
+    skipDependencies: false,
+  });
+  assert.ok(
+    all.files.some((f) => f.endsWith("node_modules/pkg/server.pem")),
+    "asked for, the dependency tree is walked",
+  );
+  assert.ok(!all.files.some((f) => f.includes("/.git/objects/")));
+  assert.ok(all.files.some((f) => f.endsWith("/.git/config")));
 });
 
 test("symlinks are followed only when the tool would follow them, and a link out of the workspace is reported", () => {
