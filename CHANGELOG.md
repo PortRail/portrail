@@ -3,6 +3,40 @@
 All notable changes to Portrail are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [0.1.5] — 2026-09-15
+
+### Security
+
+- A workspace's own git credentials are protected like the credential stores outside it.
+  Naming `.git/config`, `.git/credentials`, `.git-credentials` or a submodule's config is
+  refused, and a search that would open one (`rg --hidden`, `grep -r`) is
+  refused when the file carries a credential: a token or password in a web URL, an
+  `http.extraheader` a CI checkout left behind, or a stored password. `git` itself keeps
+  working. Before, a search's judgement skipped `.git`, so `rg --hidden TOKEN .` could
+  print a token from a remote URL, and `cat .git/config` was allowed.
+
+### Added
+
+- `decide.reachLimit` in `config.json` sets how many files a search may reach before it is
+  refused instead of judged: an integer from 100 to 1 000 000, 20 000 by default. The
+  refusal names the ways out: a subdirectory, the tool's own filters, or this setting.
+- `portrail prune --days 0 --yes` removes every finished session. It needs `--yes` because
+  an installed extension prunes its own records with the same cutoff.
+- `docs/continuity.md` says what happens to the core and to Pro if the maintainer stops;
+  `docs/agent-terms.md` quotes the agents' terms with the date they were read. The README
+  says which login to use.
+
+### Changed
+
+- The retention pass keeps the last day of retry records, which hold only a run id,
+  whatever the window, so a client retrying right after a prune is not handed a second run.
+
+### Fixed
+
+- `docs/security.md` and `docs/rules.md` state that a search's judgement leaves
+  `node_modules` out, and `docs/security.md` says how Codex's and Claude Code's logins are
+  actually handled.
+
 ## [0.1.4] — 2026-09-15
 
 ### Fixed
