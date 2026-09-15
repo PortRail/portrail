@@ -1,6 +1,6 @@
 {
   "name": "portrail",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": false,
   "description": "Remote-control Codex and Claude Code over a local HTTP gateway.",
   "keywords": [
