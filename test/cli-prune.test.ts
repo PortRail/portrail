@@ -73,10 +73,30 @@ test("portrail prune says what it removed in plain text and honours --days", asy
   assert.match(pruned.text, /1 run\b.*1 operation\b.*2 events.*1 command\b/s);
 });
 
-test("portrail prune refuses a window under one day", async () => {
+test("portrail prune takes 0 to mean everything finished, and still refuses a fraction", async () => {
   const h = seededHome();
-  await assert.rejects(captured(["--home", h, "--days", "0"]), /at least 1/);
+  // A session from an hour ago: inside every window a day or wider, but before now.
+  const store = new Store(databasePath(dataDirectory(h)));
+  seedSession(
+    store,
+    "recent",
+    new Date(Date.now() - 3_600_000).toISOString(),
+    "succeeded",
+  );
+  store.close();
+
+  const window = await captured(["--home", h, "--json", "--days", "30"]);
+  assert.equal(
+    JSON.parse(window.text).sessions,
+    1,
+    "the old session goes, the one from an hour ago stays",
+  );
+
+  const everything = await captured(["--home", h, "--json", "--days", "0"]);
+  assert.equal(JSON.parse(everything.text).sessions, 1, "0 takes what is left");
+
   await assert.rejects(captured(["--home", h, "--days", "1.5"]), /whole number/);
+  await assert.rejects(captured(["--home", h, "--days=-1"]), /0 or more/);
 });
 
 test("portrail prune gives the loaded extension the same cutoff", async () => {

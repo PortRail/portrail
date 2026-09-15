@@ -685,8 +685,8 @@ export async function prune(args: ParsedArgs): Promise<number> {
     throw new Error(
       `--days must be a whole number of days, got "${flagString(args, "days")}".`,
     );
-  if (requested !== undefined && requested < 1)
-    throw new Error("--days must be at least 1.");
+  if (requested !== undefined && requested < 0)
+    throw new Error("--days must be 0 or more; 0 removes everything that is finished.");
   const ctx = offline(flagString(args, "home"));
   try {
     const days = requested ?? ctx.config.retentionDays;
