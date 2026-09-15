@@ -413,3 +413,52 @@ test("a Codex that dies after the turn began leaves the outcome unknown, not fai
   assert.equal(outcome.state, "outcome_unknown");
   assert.match(outcome.summary, /exited/);
 });
+
+for (const resume of [false, true]) {
+  test(`a runtime rejecting public untrusted config still enforces it on thread ${resume ? "resume" : "start"}`, async () => {
+    const h = harness(
+      {
+        rejectPublicUntrusted: true,
+        steps: [
+          {
+            request: "item/commandExecution/requestApproval",
+            params: { itemId: "blocked", command: "touch blocked.flag" },
+          },
+          {
+            notify: "turn/completed",
+            params: { turn: { id: "turn_fake", status: "completed" } },
+          },
+        ],
+      },
+      () => ({ verdict: "deny", reason: "operator policy" }),
+    );
+    if (resume) h.context.nativeSessionId = "thr_existing";
+    const handle = await h.provider.start(h.context);
+    try {
+      await handle.done;
+      const binding = h
+        .log()
+        .find((e) => e.received === (resume ? "thread/resume" : "thread/start")).params;
+      assert.equal(binding.approvalPolicy, "untrusted");
+      assert.equal(binding.approvalsReviewer, "user");
+      assert.equal(h.asked.length, 1);
+      assert.equal(h.log().find((e) => e.answered).answered.result.decision, "decline");
+    } finally {
+      handle.close();
+    }
+  });
+}
+
+for (const effective of [
+  { effectiveApprovalPolicy: "on-request" },
+  { effectiveReviewer: "auto_review" },
+]) {
+  test(`a runtime that weakens the approval binding cannot start a model turn: ${JSON.stringify(effective)}`, async () => {
+    const h = harness(effective, () => ({ verdict: "allow", reason: "unused" }));
+    await assert.rejects(
+      h.provider.start(h.context),
+      /did not retain.*approval binding/,
+    );
+    assert.ok(!h.log().some((e) => e.received === "turn/start"));
+  });
+}

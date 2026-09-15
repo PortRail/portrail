@@ -41,12 +41,33 @@ test("a managed home has a clean config, prompt rules, and a shared login", () =
     assert.equal(readlinkSync(join(home.path, "auth.json")), join(source, "auth.json"));
 
     const config = readFileSync(join(home.path, "config.toml"), "utf8");
-    assert.match(config, /approval_policy = "untrusted"/);
+    assert.doesNotMatch(config, /approval_policy/);
     assert.doesNotMatch(config, /danger-full-access|notify|plugins|mcp_servers/);
 
     const rules = readFileSync(join(home.path, "rules", "portrail.rules"), "utf8");
     assert.match(rules, /prefix_rule\(pattern=\["cat"\], decision="prompt"\)/);
     assert.match(rules, /prefix_rule\(pattern=\["whoami"\], decision="prompt"\)/);
+  });
+});
+
+test("an existing managed config drops the retired public policy without changing the shared login", () => {
+  withSourceHome((source, data) => {
+    writeFileSync(join(source, "auth.json"), '{"token":"synthetic"}');
+    const home = prepareCodexHome(data);
+    writeFileSync(
+      join(home.path, "config.toml"),
+      '# Managed by Portrail.\nsandbox_mode = "workspace-write"\napproval_policy = "untrusted"\n',
+    );
+    prepareCodexHome(data);
+    assert.doesNotMatch(
+      readFileSync(join(home.path, "config.toml"), "utf8"),
+      /approval_policy/,
+    );
+    assert.equal(readlinkSync(join(home.path, "auth.json")), join(source, "auth.json"));
+    assert.equal(
+      readFileSync(join(source, "auth.json"), "utf8"),
+      '{"token":"synthetic"}',
+    );
   });
 });
 

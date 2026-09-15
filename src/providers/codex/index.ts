@@ -311,7 +311,8 @@ class CodexRun implements ProviderHandle {
      *
      * Note that Codex will often fold a whole task into one compound shell command
      * (`whoami && printf hi > x.txt && cat x.txt`) and ask once. Rules match that
-     * full string.
+     * full string. Keep this in the app-server binding: newer Codex rejects the
+     * same value in config.toml. Verify the effective binding before any turn.
      */
     const binding = {
       cwd: context.workspace.root,
@@ -336,6 +337,10 @@ class CodexRun implements ProviderHandle {
       : await rpc.call("thread/start", binding, 60_000);
     this.threadId = thread?.thread?.id ?? null;
     if (!this.threadId) throw new Error("Codex did not return a thread id.");
+    if (thread.approvalPolicy !== "untrusted" || thread.approvalsReviewer !== "user")
+      throw new Error(
+        "Codex did not retain Portrail's untrusted/user approval binding. Refusing to run without command approval enforcement.",
+      );
 
     // Verify the tool surface really is what we asked for. If Codex cannot tell
     // us, we do not know what the agent can reach — so we do not run.
