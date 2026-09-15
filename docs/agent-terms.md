@@ -55,8 +55,8 @@ read 2026-09-15 (the notice itself is dated 15 June 2026):
 > has changed: Claude Agent SDK, `claude -p`, and third-party app usage still draw from
 > your subscription's usage limits."
 
-Anthropic restricted this in April 2026, reinstated it in May with separate credits, and
-paused that change in June. Read the page before you build a business on it.
+The notice pauses changes described on the same page; it does not withdraw them. Read the
+page before you build a business on it.
 
 ## OpenAI — ChatGPT plans and Codex
 
@@ -72,8 +72,7 @@ Against that: **Codex CLI is OpenAI's own product, Apache-2.0, and ships `codex 
 scripted runs**, available to anyone on a paid ChatGPT plan
 ([Using Codex with your ChatGPT plan](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan)).
 A prohibition on programmatic extraction cannot sensibly mean "do not script the CLI we
-published for scripting". OpenAI's own guidance still points automation at API keys, and
-accounts have been suspended over automated usage patterns.
+published for scripting". For automation on behalf of other people, use an API key.
 
 Gray, leaning allowed, for one person driving their own subscription on their own machine.
 
@@ -82,7 +81,7 @@ Gray, leaning allowed, for one person driving their own subscription on their ow
 | The vendors' red line                                          | Portrail                                                                                                                                                                                                                                      |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Offer a vendor login inside your product                       | No. You run `codex login` or `claude` once, in the vendor's own flow.                                                                                                                                                                         |
-| Collect, store or intermediate credentials or session tokens   | No. Codex's login is shared with a symlink to its own `auth.json`; Claude Code's stays in the OS keychain, which is why Portrail sets no `env` and no `CLAUDE_CONFIG_DIR`. Portrail reads the auth _mode_ to report it, never the credential. |
+| Collect, store or intermediate credentials or session tokens   | No. Codex's login is shared with a symlink to its own `auth.json`, which Portrail opens only to put a refreshed token back behind that link. Claude Code's stays where Claude Code keeps it: the OS keychain on macOS, `~/.claude/.credentials.json` elsewhere. Portrail copies, stores and sends neither. |
 | Route requests through a subscription on behalf of other users | Not by design — one machine, one login, one operator. This is the line a shared machine crosses.                                                                                                                                              |
 | Pay for, resell or intermediate usage                          | No. Portrail never touches billing and has no account of its own.                                                                                                                                                                             |
 | "Ordinary, individual usage"                                   | Yours to keep. A schedule that hammers an agent around the clock is not ordinary, whatever the tooling.                                                                                                                                       |

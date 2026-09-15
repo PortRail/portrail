@@ -67,9 +67,10 @@ is to be the point where that attempt is seen and can be refused.
   sandbox needs `bubblewrap`; when it cannot start, the run refuses to start. Set
   `agents.claude.sandbox` to `"best-effort"` to run without it — the run then carries a
   warning event saying so.
-- **Credentials stay where they were.** Portrail never reads, stores or forwards agent
-  credentials. Codex's login is shared through a symlink to its own `auth.json`; Claude
-  Code's comes from the OS keychain. Which login is the right one is a licensing question
+- **Credentials stay where they were.** Portrail never stores or forwards agent
+  credentials. Codex's login is shared through a symlink to its own `auth.json`, which
+  Portrail opens only to put a refreshed token back behind that link; Claude Code's stays
+  in the OS keychain on macOS and in `~/.claude/.credentials.json` elsewhere. Which login is the right one is a licensing question
   as much as a technical one: your own subscription on your own machine is ordinary use, a
   shared or team machine should give the agent an API key. The vendors' own words, quoted
   and dated, are in [agent-terms.md](agent-terms.md).
