@@ -1,3 +1,4 @@
+import { REACH_LIMIT } from "./core/reach.ts";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { DEFAULT_PORT } from "./runtime.ts";
@@ -21,7 +22,16 @@ export interface PortrailConfig {
    * deny wins; allow passes; ask parks the run until someone at this machine answers
    * (portrail run prompts, or portrail approve/deny); anything else is refused.
    */
-  decide: { allow: string[]; deny: string[]; ask: string[] };
+  decide: {
+    allow: string[];
+    deny: string[];
+    ask: string[];
+    /**
+     * How many files a single search may reach before it is refused instead of judged
+     * file by file. Raise it for a large repository, at the cost of a slower judgement.
+     */
+    reachLimit: number;
+  };
   retentionDays: number;
 }
 
@@ -235,9 +245,13 @@ export const DEFAULT_CONFIG: PortrailConfig = {
     // unanswered ask is a 15-minute stall. Put "exec:*" here to be asked about every
     // command the lists do not cover.
     ask: [],
+    reachLimit: REACH_LIMIT,
   },
   retentionDays: 30,
 };
+
+/** What `decide.reachLimit` may be set to: enough to be useful, bounded so a judgement stays quick. */
+export const REACH_LIMIT_BOUNDS = { min: 100, max: 1_000_000 } as const;
 
 export const configPath = (dataDir: string) => resolve(dataDir, "config.json");
 
@@ -298,6 +312,14 @@ export function validateConfig(input: unknown): PortrailConfig {
       merged.decide[field].some((entry) => typeof entry !== "string")
     )
       invalid(`decide.${field} must be an array of "kind:pattern" strings.`);
+  if (
+    !Number.isInteger(merged.decide.reachLimit) ||
+    merged.decide.reachLimit < REACH_LIMIT_BOUNDS.min ||
+    merged.decide.reachLimit > REACH_LIMIT_BOUNDS.max
+  )
+    invalid(
+      `decide.reachLimit must be an integer from ${REACH_LIMIT_BOUNDS.min} to ${REACH_LIMIT_BOUNDS.max}.`,
+    );
   for (const agent of ["codex", "claude"] as const) {
     const path = merged.agents[agent].path;
     if (path !== null && (typeof path !== "string" || !path.startsWith("/")))

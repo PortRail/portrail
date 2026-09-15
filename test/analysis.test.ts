@@ -104,6 +104,11 @@ test("a search is judged by the files it opens, narrowed by its filters, and ref
   });
   assert.equal(bounded.searches.length, 1, "the walk stops at the first refusal");
   assert.match(bounded.searches[0]!.refused!, /too many files/);
+  assert.match(
+    bounded.searches[0]!.refused!,
+    /decide\.reachLimit/,
+    "the refusal names every way out, including the setting",
+  );
   assert.deepEqual(bounded.searches[0]!.files, []);
 });
 

@@ -116,13 +116,18 @@ export async function assemble(
     );
   }
 
-  const gateway = new Gateway(store, providers, new BuiltinDecider(config.decide), {
-    dataDir,
-    maxConcurrent: config.run.maxConcurrent,
-    defaultMaxSeconds: config.run.maxSeconds,
-    approvalTimeoutMs: config.approvals.timeoutMinutes * 60 * 1000,
-    maxQueued: 100,
-  });
+  const gateway = new Gateway(
+    store,
+    providers,
+    new BuiltinDecider(config.decide, { reachLimit: config.decide.reachLimit }),
+    {
+      dataDir,
+      maxConcurrent: config.run.maxConcurrent,
+      defaultMaxSeconds: config.run.maxSeconds,
+      approvalTimeoutMs: config.approvals.timeoutMinutes * 60 * 1000,
+      maxQueued: 100,
+    },
+  );
   // This process owns the runs, so it — and only it — reconciles what a previous
   // process left behind.
   gateway.recover();

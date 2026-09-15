@@ -392,6 +392,7 @@ test("a command that names a file is judged as a read of that file, by its real 
   assert.equal((await judge("cat src/a.ts")).verdict, "allow");
 
   const custom = {
+    ...DEFAULT_CONFIG.decide,
     allow: ["read:**", "write:**", "exec:*"],
     deny: ["read:confidential/**"],
     ask: [],

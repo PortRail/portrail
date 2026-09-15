@@ -43,13 +43,18 @@ export function adminGateway(
   config: PortrailConfig,
   dataDir: string,
 ): Gateway {
-  return new Gateway(store, new Map(), new BuiltinDecider(config.decide), {
-    dataDir,
-    maxConcurrent: 0,
-    defaultMaxSeconds: config.run.maxSeconds,
-    approvalTimeoutMs: 1,
-    maxQueued: 0,
-  });
+  return new Gateway(
+    store,
+    new Map(),
+    new BuiltinDecider(config.decide, { reachLimit: config.decide.reachLimit }),
+    {
+      dataDir,
+      maxConcurrent: 0,
+      defaultMaxSeconds: config.run.maxSeconds,
+      approvalTimeoutMs: 1,
+      maxQueued: 0,
+    },
+  );
 }
 
 // ---------------------------------------------------------------- start
