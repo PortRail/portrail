@@ -80,6 +80,12 @@ product is complete without it.
 
 `portrail doctor` checks all of it and tells you what to fix.
 
+**Which login.** Portrail uses the login the agent already has. On your own machine that is
+your own Codex or Claude subscription, and that is ordinary use. On a shared or team
+machine, configure an API key for the agent instead — a personal subscription is not
+licensed for use on behalf of others. The vendors' own wording, with dates, is in
+[docs/agent-terms.md](docs/agent-terms.md).
+
 ## Documentation
 
 - [Quickstart](docs/quickstart.md) — from install to first run in five minutes
@@ -88,6 +94,8 @@ product is complete without it.
 - [Remote access](docs/remote.md) — TLS, reverse proxies, tunnels, and a Make.com recipe
 - [Security model](docs/security.md) — what Portrail protects against and what it does not
 - [SDK](docs/sdk.md) — the TypeScript client
+- [Agent terms](docs/agent-terms.md) — what Anthropic and OpenAI allow, quoted and dated
+- [Continuity](docs/continuity.md) — what happens to this if the maintainer stops
 
 ## Status
 
@@ -95,6 +103,12 @@ product is complete without it.
 tarball install, the systemd service, crash recovery under `kill -9`, and a Cloudflare
 tunnel from the public internet. The API is stable within 0.x for the routes documented
 in [docs/api.md](docs/api.md); see [CHANGELOG.md](CHANGELOG.md).
+
+## Who maintains this
+
+One person, with the free core under MIT so it does not depend on them. What that means in
+practice — forking, releases, an unmaintained install, and Pro's escrow — is in
+[docs/continuity.md](docs/continuity.md).
 
 ## Licence
 
