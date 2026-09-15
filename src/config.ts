@@ -29,8 +29,10 @@ export interface PortrailConfig {
     /**
      * How many files a single search may reach before it is refused instead of judged
      * file by file. Raise it for a large repository, at the cost of a slower judgement.
+     * Optional in the type so lists written by hand stay valid; a loaded config always
+     * carries it, 20 000 unless set.
      */
-    reachLimit: number;
+    reachLimit?: number;
   };
   retentionDays: number;
 }
@@ -312,10 +314,13 @@ export function validateConfig(input: unknown): PortrailConfig {
       merged.decide[field].some((entry) => typeof entry !== "string")
     )
       invalid(`decide.${field} must be an array of "kind:pattern" strings.`);
+  const reachLimit = merged.decide.reachLimit as unknown;
   if (
-    !Number.isInteger(merged.decide.reachLimit) ||
-    merged.decide.reachLimit < REACH_LIMIT_BOUNDS.min ||
-    merged.decide.reachLimit > REACH_LIMIT_BOUNDS.max
+    reachLimit !== undefined &&
+    (typeof reachLimit !== "number" ||
+      !Number.isInteger(reachLimit) ||
+      reachLimit < REACH_LIMIT_BOUNDS.min ||
+      reachLimit > REACH_LIMIT_BOUNDS.max)
   )
     invalid(
       `decide.reachLimit must be an integer from ${REACH_LIMIT_BOUNDS.min} to ${REACH_LIMIT_BOUNDS.max}.`,
