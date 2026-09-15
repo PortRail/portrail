@@ -87,9 +87,11 @@ export function isWorkspaceSecret(relativePath: string): boolean {
   const git = parts.lastIndexOf(".git");
   if (git === -1 || git === parts.length - 1) return false;
   const inside = parts.slice(git + 1, -1);
-  // .git/config and .git/credentials, and a submodule's config under .git/modules/<name>/.
-  if (inside.length === 0) return name === "config" || name === "credentials";
-  return name === "config" && inside[0] === "modules" && inside.length >= 2;
+  const config = name === "config" || name === "config.worktree";
+  if (inside.length === 0) return config || name === "credentials";
+  // Submodules may have nested submodules or linked worktrees of their own.
+  if (inside[0] === "modules" && inside.length >= 2) return config;
+  return name === "config.worktree" && inside[0] === "worktrees" && inside.length === 2;
 }
 
 /**
@@ -112,7 +114,8 @@ const CREDENTIAL_FORMS: readonly RegExp[] = [
  * every repository and is usually dull, so it is read — a few kilobytes, once, only when
  * a search would open it — and refuses the search only when it carries a token in a
  * remote URL or a stored password. Refusing every repository's config would refuse
- * `rg --hidden x .` everywhere and buy nothing.
+ * `rg --hidden x .` everywhere and buy nothing. Worktree configs get the same check.
+ * A config larger than 64 KiB is protected without guessing about its unread suffix.
  */
 export function holdsGitCredentials(
   absolutePath: string,
@@ -120,14 +123,23 @@ export function holdsGitCredentials(
 ): boolean {
   if (!isWorkspaceSecret(relativePath)) return false;
   const name = relativePath.split("/").at(-1)?.toLowerCase();
-  if (name !== "config") return true;
+  if (name !== "config" && name !== "config.worktree") return true;
   let text: string;
   try {
     const handle = openSync(absolutePath, "r");
     try {
-      const buffer = Buffer.alloc(64 * 1024);
-      const read = readSync(handle, buffer, 0, buffer.length, 0);
-      text = buffer.subarray(0, read).toString("utf8");
+      const limit = 64 * 1024;
+      // Read one extra byte to distinguish EOF from an unexamined suffix. Keep
+      // reading after a short read; it does not establish the end of the file.
+      const buffer = Buffer.alloc(limit + 1);
+      let bytes = 0;
+      while (bytes < buffer.length) {
+        const read = readSync(handle, buffer, bytes, buffer.length - bytes, bytes);
+        if (read === 0) break;
+        bytes += read;
+      }
+      if (bytes > limit) return true;
+      text = buffer.subarray(0, bytes).toString("utf8");
     } finally {
       closeSync(handle);
     }

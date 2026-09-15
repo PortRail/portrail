@@ -211,7 +211,7 @@ async function reach(
         segment,
         where,
         files: [],
-        refused: `Refused: a search over ${where} reaches too many files to judge (more than ${limit}). Search a subdirectory, narrow it with the tool's own filters (-g, --include), or raise decide.reachLimit in config.json.`,
+        refused: `Refused: a search over ${where} reaches too many files to judge (limit ${limit}). Search a subdirectory or raise decide.reachLimit in config.json. The limit applies before the tool's include/exclude filters.`,
       });
       return searches;
     }
