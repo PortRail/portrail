@@ -393,3 +393,38 @@ test("a command's working directory and the paths in its arguments are held agai
   assert.match(exec("cat $HOME/.ssh/id_rsa").refused ?? "", /variable expansion/);
   assert.match(exec("ls src/*").refused ?? "", /shell glob/);
 });
+
+test("a workspace's own git credentials are protected, and git itself still runs", () => {
+  const root = realTmp("ws-");
+  mkdirSync(join(root, ".git"), { recursive: true });
+  writeFileSync(
+    join(root, ".git", "config"),
+    '[remote "origin"]\n\turl = https://user:synthetic@example.test/x.git\n',
+  );
+  const read: Operation = { ...base, kind: "read", paths: [".git/config"] };
+  assert.match(
+    containOperation(read, root).refused ?? "",
+    /protected in every workspace/,
+  );
+  const named: Operation = {
+    ...base,
+    kind: "exec",
+    command: "cat .git/config",
+    cwd: root,
+  };
+  assert.match(
+    containOperation(named, root).refused ?? "",
+    /protected in every workspace/,
+  );
+  const status: Operation = {
+    ...base,
+    kind: "exec",
+    command: "git status --short",
+    cwd: root,
+  };
+  assert.equal(
+    containOperation(status, root).refused,
+    null,
+    "git reads its own config on every call; the file is protected, the command is not",
+  );
+});

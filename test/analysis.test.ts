@@ -207,3 +207,49 @@ test("net and tool operations reduce to one subject", async () => {
   );
   assert.equal(tool.subject, "github/create_issue");
 });
+
+test("a search that would open the workspace's git credentials is refused", async () => {
+  const repo = realpathSync.native(
+    mkdtempSync(join(tmpdir(), "portrail-analysis-repo-")),
+  );
+  mkdirSync(join(repo, ".git", "objects"), { recursive: true });
+  writeFileSync(
+    join(repo, ".git", "config"),
+    '[remote "origin"]\n\turl = https://user:synthetic@example.test/x.git\n',
+  );
+  writeFileSync(join(repo, ".git", "objects", "packed"), "");
+  writeFileSync(join(repo, "a.ts"), "");
+
+  const hidden = await analyseOperation(exec("rg --hidden TOKEN .", { cwd: repo }), {
+    workspaceRoot: repo,
+  });
+  assert.match(hidden.searches[0]!.refused ?? "", /\.git\/config/);
+
+  const plain = await analyseOperation(exec("rg TOKEN .", { cwd: repo }), {
+    workspaceRoot: repo,
+  });
+  assert.equal(
+    plain.searches[0]!.refused,
+    null,
+    "a tool that does not read dotfiles never opens it",
+  );
+
+  const dull = realpathSync.native(
+    mkdtempSync(join(tmpdir(), "portrail-analysis-plain-")),
+  );
+  mkdirSync(join(dull, ".git"), { recursive: true });
+  writeFileSync(
+    join(dull, ".git", "config"),
+    '[remote "origin"]\n\turl = git@example.test:x/y.git\n',
+  );
+  writeFileSync(join(dull, "a.ts"), "");
+  const searched = await analyseOperation(exec("rg --hidden TOKEN .", { cwd: dull }), {
+    workspaceRoot: dull,
+  });
+  assert.equal(
+    searched.searches[0]!.refused,
+    null,
+    "a config that stores no credential refuses nothing",
+  );
+  assert.ok(searched.searches[0]!.files.includes(".git/config"));
+});

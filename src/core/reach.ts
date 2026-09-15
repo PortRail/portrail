@@ -1,5 +1,5 @@
 import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { canonicalPath, isWithin } from "./paths.ts";
 
 function real(path: string): string {
@@ -13,8 +13,12 @@ function real(path: string): string {
 /** More files than this and a search is refused rather than judged file by file. */
 export const REACH_LIMIT = 20_000;
 
-/** Dependency and history trees: huge, and not where anyone keeps a secret they still use. */
-const SKIPPED = new Set(["node_modules", ".git"]);
+/**
+ * Stores under a `.git` directory, a submodule's included, that hold packed or large
+ * objects: a text search never matches inside them, and walking them makes a judgement
+ * slow. A submodule's own config under `.git/modules` is walked.
+ */
+const GIT_OBJECT_STORES = new Set(["objects", "lfs"]);
 
 export interface Reach {
   /** Every regular file the search can read, as canonical paths. */
@@ -27,15 +31,30 @@ export interface Reach {
 
 /**
  * What a search over `dir` can reach, the way the tool would walk it: hidden entries
- * only when the tool reads them, symlinks only when the tool follows them. Bounded,
+ * only when the tool reads them, symlinks only when the tool follows them, never the
+ * compressed object stores under `.git` and, unless asked, never `node_modules`. Bounded,
  * because a judgement that takes a second is a judgement nobody waits for.
  */
 export function reachableFiles(
   dir: string,
   declaredRoot: string,
-  options: { hidden: boolean; follow: boolean; limit?: number },
+  options: {
+    hidden: boolean;
+    follow: boolean;
+    limit?: number;
+    /**
+     * Leave `node_modules` out of the walk. On by default: every project ignores it,
+     * walking it costs more than the limit allows, and what a package ships is not the
+     * operator's secret. A caller that wants it judged passes `false`.
+     */
+    skipDependencies?: boolean;
+  },
 ): Reach {
   const limit = options.limit ?? REACH_LIMIT;
+  const skipDependencies = options.skipDependencies ?? true;
+  const skipped = (parent: string, name: string) =>
+    (skipDependencies && name === "node_modules") ||
+    (GIT_OBJECT_STORES.has(name) && parent.split(sep).includes(".git"));
   const root = real(declaredRoot);
   const start = real(dir);
   const files: string[] = [];
@@ -51,7 +70,7 @@ export function reachableFiles(
     }
     for (const entry of entries) {
       if (!options.hidden && entry.name.startsWith(".")) continue;
-      if (SKIPPED.has(entry.name) && entry.isDirectory()) continue;
+      if (entry.isDirectory() && skipped(current, entry.name)) continue;
       const full = join(current, entry.name);
       if (entry.isSymbolicLink()) {
         if (!options.follow) continue;

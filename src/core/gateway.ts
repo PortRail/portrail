@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ensure, fail, isPortrailError } from "../contracts/errors.ts";
 import type { Decider, DecisionContext } from "../extension.ts";
 import type { Provider, ProviderEvent, ProviderHandle } from "../providers/types.ts";
@@ -17,7 +17,7 @@ import {
   IN_FLIGHT_STATES,
 } from "../types.ts";
 import { parseCommand, type CommandSegment } from "../decide/builtin.ts";
-import { PROTECTED_HOME_ENTRIES } from "./protected.ts";
+import { PROTECTED_HOME_ENTRIES, isWorkspaceSecret } from "./protected.ts";
 import { RUN_MAX_SECONDS } from "../config.ts";
 import { canonicalPath, isWithin, isWithinFold } from "./paths.ts";
 export { canonicalPath } from "./paths.ts";
@@ -1156,6 +1156,11 @@ export function judgeCommandPaths(
             refused: `Refused: the command names ${part}, which resolves outside the workspace (${canonical}).`,
             paths: [],
           };
+        if (isWorkspaceSecret(relative(root, canonical)))
+          return {
+            refused: `Refused: the command names ${part}, which holds this workspace's own credentials and is protected in every workspace.`,
+            paths: [],
+          };
         try {
           lstatSync(canonical);
           paths.add(canonical);
@@ -1203,6 +1208,11 @@ export function containOperation(
       return {
         canonical,
         refused: `Refused: ${declared} is inside a protected directory (${hit}).`,
+      };
+    if (isWorkspaceSecret(relative(root, canonical)))
+      return {
+        canonical,
+        refused: `Refused: ${declared} holds this workspace's own credentials and is protected in every workspace.`,
       };
     return { canonical, refused: null };
   };

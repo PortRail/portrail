@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import type { Operation, OperationKind, SearchFilter } from "../types.ts";
 import { isWithin } from "../core/paths.ts";
+import { holdsGitCredentials } from "../core/protected.ts";
 import { REACH_LIMIT, reachableFiles } from "../core/reach.ts";
 import { parseCommand, type CommandSegment } from "./command.ts";
 import { compileFilter, type Candidate } from "./filter.ts";
@@ -241,12 +242,21 @@ async function reach(
           suspects.map(([file]) => file),
         )
       : new Set<string>();
-    searches.push({
-      segment,
-      where,
-      files: named.filter(([file]) => !ignored.has(file)).map(([, path]) => path),
-      refused: null,
-    });
+    const kept = named.filter(([file]) => !ignored.has(file));
+    const files = kept.map(([, path]) => path);
+    // The workspace's own credentials are not a matter of rules: a search that would
+    // open one is refused here, where no decider can lift it.
+    const secret = kept.find(([file, path]) => holdsGitCredentials(file, path))?.[1];
+    if (secret) {
+      searches.push({
+        segment,
+        where,
+        files: [],
+        refused: `Refused: a search over ${where} reaches ${secret}, which is protected in every workspace. Search a narrower path.`,
+      });
+      return searches;
+    }
+    searches.push({ segment, where, files, refused: null });
   }
   return searches;
 }
