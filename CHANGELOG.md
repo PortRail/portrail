@@ -3,6 +3,22 @@
 All notable changes to Portrail are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [Unreleased]
+
+### Security
+
+- Protect Git configurations larger than 64 KiB instead of treating their unread suffix
+  as credential-free. Searches could previously reveal tokens beyond the read limit.
+- Protect `config.worktree` in the main Git directory and in linked-worktree and
+  submodule metadata. Direct access is refused; searches inspect small configurations
+  for credentials and refuse oversized ones, while ordinary Git commands keep working.
+
+### Fixed
+
+- A search that hits the directory-walk limit now suggests a smaller search root or a
+  higher `decide.reachLimit`. Include/exclude filters run after that limit, so adding
+  them cannot resolve this refusal.
+
 ## [0.1.5] — 2026-09-15
 
 ### Security

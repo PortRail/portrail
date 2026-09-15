@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyseOperation } from "../src/decide/analysis.ts";
@@ -252,4 +252,29 @@ test("a search that would open the workspace's git credentials is refused", asyn
     "a config that stores no credential refuses nothing",
   );
   assert.ok(searched.searches[0]!.files.includes(".git/config"));
+});
+
+test("a filtered search over the walk limit suggests only ways to reduce that walk", async (t) => {
+  const root = realpathSync.native(
+    mkdtempSync(join(tmpdir(), "portrail-filter-limit-")),
+  );
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (let i = 0; i < 100; i++) writeFileSync(join(root, `${i}.txt`), "");
+  writeFileSync(join(root, "only.ts"), "");
+  const operation = exec("rg -g '*.ts' TOKEN .", { cwd: root });
+  const limited = await analyseOperation(operation, {
+    workspaceRoot: root,
+    reachLimit: 100,
+  });
+  const reason = limited.searches[0]!.refused!;
+  assert.match(reason, /too many files/);
+  assert.match(reason, /subdirectory.*decide\.reachLimit/);
+  assert.match(reason, /before.*filters/);
+  assert.doesNotMatch(reason, /narrow it with/);
+  const raised = await analyseOperation(operation, {
+    workspaceRoot: root,
+    reachLimit: 200,
+  });
+  assert.equal(raised.searches[0]!.refused, null);
+  assert.deepEqual(raised.searches[0]!.files, ["only.ts"]);
 });

