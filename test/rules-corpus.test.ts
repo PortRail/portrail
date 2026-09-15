@@ -50,6 +50,7 @@ const base = {
 };
 type Lists = typeof DEFAULT_CONFIG.decide;
 const CUSTOM: Lists = {
+  ...DEFAULT_CONFIG.decide,
   allow: ["read:**", "write:**", "exec:*"],
   deny: ["read:confidential/**", "exec:curl *"],
   ask: [],

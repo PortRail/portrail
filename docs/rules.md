@@ -128,6 +128,15 @@ whatever was committed.
 Codex wraps commands in `/bin/zsh -lc '…'`; Portrail strips that wrapper first, so
 `exec:cat *` means the same thing for both agents.
 
+A search is judged by the files it would open, so it has to be countable: more than
+`decide.reachLimit` files (20 000 by default) and the search is refused rather than
+guessed at. The refusal names the three ways out — search a subdirectory, narrow it with
+the tool's own filters (`rg -g`, `grep --include`), or raise the limit in `config.json`:
+
+```json
+{ "decide": { "reachLimit": 50000 } }
+```
+
 ## Patterns
 
 Paths use file globs: `*` stops at a slash, `**` crosses them, `**/x` also matches `x` at

@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_CONFIG, RUN_MAX_SECONDS, validateConfig } from "../src/config.ts";
+import {
+  DEFAULT_CONFIG,
+  REACH_LIMIT_BOUNDS,
+  RUN_MAX_SECONDS,
+  validateConfig,
+  type PortrailConfig,
+} from "../src/config.ts";
 import { parsePatterns } from "../src/decide/match.ts";
 
 test("the shipped defaults are internally valid", () => {
@@ -37,4 +43,36 @@ test("the run time limit has the same bounds in the config as on the API", () =>
   assert.throws(() => validateConfig({ run: { maxSeconds: 29 } }), /run\.maxSeconds/);
   assert.equal(validateConfig({ run: { maxSeconds: 14_400 } }).run.maxSeconds, 14_400);
   assert.deepEqual(RUN_MAX_SECONDS, { min: 30, max: 14_400 });
+});
+
+test("the search reach limit has bounds, and a config without one keeps the default", () => {
+  assert.equal(
+    validateConfig({ decide: { allow: [] } }).decide.reachLimit,
+    DEFAULT_CONFIG.decide.reachLimit,
+  );
+  assert.equal(validateConfig({ decide: { reachLimit: 500 } }).decide.reachLimit, 500);
+  assert.throws(
+    () => validateConfig({ decide: { reachLimit: 10 } }),
+    /decide\.reachLimit/,
+  );
+  assert.throws(
+    () => validateConfig({ decide: { reachLimit: REACH_LIMIT_BOUNDS.max + 1 } }),
+    /decide\.reachLimit/,
+  );
+  assert.throws(
+    () => validateConfig({ decide: { reachLimit: 1.5 } }),
+    /decide\.reachLimit/,
+  );
+});
+
+test("decide lists written by hand need no reach limit, as an extension or an older caller writes them", () => {
+  const lists: PortrailConfig["decide"] = { allow: ["exec:ls"], deny: [], ask: [] };
+  assert.equal(
+    validateConfig({ decide: lists }).decide.reachLimit,
+    DEFAULT_CONFIG.decide.reachLimit,
+  );
+  assert.throws(
+    () => validateConfig({ decide: { reachLimit: null } }),
+    /decide\.reachLimit/,
+  );
 });
