@@ -30,7 +30,7 @@ portrail start
 ```
 
 ```
-Portrail 0.1.0 listening on http://127.0.0.1:7431
+Portrail 0.1.6 listening on http://127.0.0.1:7431
   data:    /Users/you/.portrail
   agents:  codex, claude
   rules:   built-in allow/deny list
