@@ -35,7 +35,7 @@ That request returns when the agent is done, with what it did and what it said.
 - **A real API.** Runs, sessions, resumable event streams, cancel, steer, `wait` for
   synchronous callers, idempotency keys for automations that retry.
 - **Reachable from anywhere.** Bind to an interface with TLS, put it behind a proxy, or
-  `portrail start --tunnel` for a public URL on a laptop behind NAT.
+  `portrail start --tunnel cloudflare` for a public URL on a laptop behind NAT.
 - **Honest about failure.** If Portrail loses track of an agent mid-run, the run ends as
   `outcome_unknown` — never a silent success, never a replay. A run that finished but had
   something refused says so: `operations.denied` is on every run, and `portrail run` exits 2.
@@ -99,7 +99,7 @@ licensed for use on behalf of others. The vendors' own wording, with dates, is i
 
 ## Status
 
-0.1.0 — early release. Tested on macOS and Ubuntu 24.04 with both agents: real runs,
+0.1.6 — early release. Tested on macOS and Ubuntu 24.04 with both agents: real runs,
 tarball install, the systemd service, crash recovery under `kill -9`, and a Cloudflare
 tunnel from the public internet. The API is stable within 0.x for the routes documented
 in [docs/api.md](docs/api.md); see [CHANGELOG.md](CHANGELOG.md).

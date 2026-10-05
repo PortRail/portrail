@@ -16,7 +16,7 @@ portrail start --tunnel cloudflare
 ```
 Opening cloudflare tunnel… https://random-words.trycloudflare.com
 Waiting for DNS to propagate… reachable.
-Portrail 0.1.0 listening on http://127.0.0.1:7431
+Portrail 0.1.6 listening on http://127.0.0.1:7431
   public:  https://random-words.trycloudflare.com  (cloudflare tunnel — API keys still required)
 ```
 
